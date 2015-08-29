@@ -1,0 +1,22 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006-2014 OpenWrt.org
+
+START=72
+STOP=30
+FIREWALL_RELOAD=0
+IFACE=tun0
+IP=10.10.0.2/24
+SERVER=IP:PORT
+PASSWORD=PASSWORD
+
+start() {
+    xTun -i $IFACE -I $IP -m client -k $PASSWORD -s $SERVER
+}
+
+stop() {
+    xTun --signal stop
+}
+
+shutdown() {
+    xTun --signal quit
+}

@@ -26,17 +26,38 @@ Usage
 
 ```bash
 xTun -i IFACE -I IP/MASK -c server -k PASSWORD
+scripts/server_up.sh
 ```
 
 Stop:
 ```bash
 xTun --signal stop
+scripts/server_down.sh
 ```
 
 ### Client
 
 ```bash
 xTun -i IFACE -I IP/MASK -c client -k PASSWORD -s SERVER
+scripts/client_up.sh
+```
+
+Stop:
+```bash
+xTun --signal stop
+scripts/client_down.sh
+```
+
+### OpenWrt
+
+Modify your SERVER and PASSWORD in /etc/init.d/xTun
+```bash
+/etc/init.d/xTun start
+```
+
+Stop:
+```bash
+/etc/init.d/xTun stop
 ```
 
 ## License

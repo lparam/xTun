@@ -182,7 +182,6 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
         int mlen = read(tun->tunfd, m, tun->mtu);
 
         if (mlen <= 0) {
-            logger_log(LOG_ERR, "mlen: %d", mlen);
             free(tunbuf);
             return;
         }

@@ -32,4 +32,5 @@
 *.dSYM/
 
 *.swp
-./xTun
+.ycm_extra_conf.pyc
+/xTun

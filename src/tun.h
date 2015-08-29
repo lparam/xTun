@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include "uv.h"
 
-#define xTun_VERSION      "0.1.0"
+#define xTun_VERSION      "0.2.0"
 #define xTun_VER          "xTun/" xTun_VERSION
 
 #define PRIMITIVE_BYTES 24

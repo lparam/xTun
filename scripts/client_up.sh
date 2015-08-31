@@ -20,9 +20,6 @@ iptables -t nat -N $CHAIN > /dev/null 2>&1 || (
 iptables -t nat -A $CHAIN -o $IFACE -j MASQUERADE
 iptables -t nat -A POSTROUTING -j $CHAIN
 
-iptables -I FORWARD 1 -i $IFACE -m state --state RELATED,ESTABLISHED -j ACCEPT
-iptables -I FORWARD 1 -o $IFACE -j ACCEPT
-
 iptables -N $CHAIN > /dev/null 2>&1 || (
     iptables -D FORWARD -j $CHAIN
     iptables -F $CHAIN

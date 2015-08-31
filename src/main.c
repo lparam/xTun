@@ -55,7 +55,7 @@ static const struct option _lopts[] = {
 
 static void
 print_usage(const char *prog) {
-    printf("xTun Version: %s Maintained by Ken <ken.i18n@gmail.com>\n", xTun_VER);
+    printf("xTun Version: %s Maintained by lparam\n", xTun_VER);
     printf("Usage: %s <-i iface> <-I ifconf> <-m mode> <-k password> <-s server> [-p pidfile] [-nhvV]\n\n", prog);
     printf("Options:\n");
     puts("  -i <iface>\t\t : interface name (e.g. tun0)\n"

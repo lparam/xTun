@@ -269,13 +269,13 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode, struct soc
     }
 
 	char *nmask = strchr(ifconf, '/');
-	uint8_t ipaddr[16] = {0};
-	memcpy(ipaddr, ifconf, (uint32_t) (nmask - ifconf));
-
 	if(!nmask) {
 		logger_stderr("ifconf syntax error: %s", ifconf);
 		exit(0);
 	}
+
+	uint8_t ipaddr[16] = {0};
+	memcpy(ipaddr, ifconf, (uint32_t) (nmask - ifconf));
 
 	in_addr_t netmask = 0xffffffff;
 	netmask = (netmask << (32 - atoi(++nmask)));

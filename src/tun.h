@@ -1,5 +1,5 @@
-#ifndef _TUN_H
-#define _TUN_H
+#ifndef TUN_H
+#define TUN_H
 
 #include <stdint.h>
 #include "uv.h"
@@ -24,4 +24,4 @@ void tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode, struc
 int tun_start(uv_loop_t *loop, struct tundev *tun);
 void tun_stop(struct tundev *tun);
 
-#endif // for #ifndef _TUN_H
+#endif // for #ifndef TUN_H

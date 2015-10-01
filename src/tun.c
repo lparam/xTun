@@ -196,7 +196,7 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
                 strcpy(saddr, a);
                 a = inet_ntoa(*(struct in_addr *) &iphdr->daddr);
                 strcpy(daddr, a);
-                logger_stderr("Destination address miss: %s -> %s", saddr, daddr);
+                logger_log(LOG_WARNING, "Destination address miss: %s -> %s", saddr, daddr);
                 return;
             }
             addr = &ra->addr;

@@ -56,21 +56,21 @@ static const struct option _lopts[] = {
 static void
 print_usage(const char *prog) {
     printf("xTun Version: %s Maintained by lparam\n", xTun_VER);
-    printf("Usage: %s <-i iface> <-I ifconf> <-m mode> <-k password> <-s server> [-p pidfile] [-nhvV]\n\n", prog);
+    printf("Usage:\n  %s [options]\n", prog);
     printf("Options:\n");
-    puts("  -i <iface>\t\t : interface name (e.g. tun0)\n"
-         "  -I <ifconf>\t\t : IP Address of interface (e.g. 10.3.0.1/16)\n"
-         "  -m <mode>\t\t : client, server\n"
-         "  -k <password>\t\t : password of server\n"
-         "  -s <server address>\t : server address:port (only available in client mode)\n"
-         "  [-l <bind address>]\t : bind address:port (only available in server mode, default: 0.0.0.0:1082)\n"
-         "  [-p <pidfile>]\t : pid file path (default: /var/run/xTun/xTun.pid)\n"
-         "  [--mtu <mtu>]\t\t : MTU size (default: 1440)\n"
-         "  [--signal <signal>]\t : send signal to xTun: quit, stop\n"
-         "  [-n]\t\t\t : non daemon mode\n"
-         "  [-h, --help]\t\t : this help\n"
-         "  [-v, --version]\t : show version\n"
-         "  [-V] \t\t\t : verbose mode\n");
+    puts("  -i <iface>\t\t interface name (e.g. tun0)\n"
+         "  -I <ifconf>\t\t IP address of interface (e.g. 10.3.0.1/16)\n"
+         "  -m <mode>\t\t client, server\n"
+         "  -k <encryption_key>\t shared password for data encryption\n"
+         "  -s <server address>\t server address:port (only available in client mode)\n"
+         "  [-l <bind address>]\t bind address:port (only available in server mode, default: 0.0.0.0:1082)\n"
+         "  [-p <pid_file>]\t PID file of daemon (default: /var/run/xTun.pid)\n"
+         "  [--mtu <mtu>]\t\t MTU size (default: 1440)\n"
+         "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
+         "  [-n]\t\t\t non daemon mode\n"
+         "  [-h, --help]\t\t this help\n"
+         "  [-v, --version]\t show version\n"
+         "  [-V] \t\t\t verbose mode\n");
 
     exit(1);
 }

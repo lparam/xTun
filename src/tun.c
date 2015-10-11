@@ -103,8 +103,8 @@ static void
 inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf, const struct sockaddr *addr, unsigned flags) {
     if (nread > 0) {
         uint8_t *m = (uint8_t *)buf->base;
-        ssize_t mlen = nread;
-        int rc = crypto_decrypt(m, (uint8_t *)buf->base, mlen);
+        ssize_t mlen = nread - PRIMITIVE_BYTES;
+        int rc = crypto_decrypt(m, (uint8_t *)buf->base, nread);
         if (rc) {
             logger_log(LOG_ERR, "Invalid udp packet");
             goto err;
@@ -143,7 +143,7 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf, const struct 
         }
 
         for (;;) {
-            int rc = write(tun->tunfd, m, mlen - PRIMITIVE_BYTES);
+            int rc = write(tun->tunfd, m, mlen);
             if (rc < 0) {
                 if (errno == EINTR) {
                     continue;

@@ -135,7 +135,7 @@ distclean: clean
 
 ifndef CROSS_COMPILE
 install:
-	$(Q)$(STRIP) --strip-unneeded xtund && cp xtund $(INSTALL_DIR)
+	$(Q)$(STRIP) --strip-unneeded xTun && cp xTun $(INSTALL_DIR)
 else
 install:
 endif

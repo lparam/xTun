@@ -14,19 +14,24 @@ IP_ROUTE_TABLE=xTun
 FWMARK="0x02/0x02"
 SETNAME=wall
 CHAIN=xTun
+DNS=8.8.8.8
+BLACK_LIST=/etc/black_list
 
 start() {
     xTun -i $IFACE -I $IP -m client -k $PASSWORD -s $SERVER
     net_start
+    acl add
 }
 
 stop() {
     net_stop
+    acl del
     xTun --signal stop
 }
 
 shutdown() {
     net_stop
+    acl del
     xTun --signal quit
 }
 
@@ -78,7 +83,7 @@ net_start() {
     fi
 
     ip route add default dev $IFACE table $IP_ROUTE_TABLE
-    ip route list | grep -q "8.8.8.8 dev $IFACE" || ip route add 8.8.8.8 dev $IFACE
+    ip route list | grep -q "$DNS dev $IFACE" || ip route add $DNS dev $IFACE
     ip rule list | grep -q "fwmark $FWMARK lookup $IP_ROUTE_TABLE" || ip rule add fwmark $FWMARK table $IP_ROUTE_TABLE
 
     ip route flush cache
@@ -99,7 +104,7 @@ net_stop() {
     iptables -t mangle -X $CHAIN > /dev/null 2>&1
 
     ip route del default dev $IFACE table $IP_ROUTE_TABLE > /dev/null 2>&1
-    ip route del 8.8.8.8 dev $IFACE > /dev/null 2>&1
+    ip route del $DNS dev $IFACE > /dev/null 2>&1
     xTun_rule_ids=`ip rule list | grep "lookup $IP_ROUTE_TABLE" | sed 's/://g' | awk '{print $1}'`
     for rule_id in $xTun_rule_ids
     do
@@ -107,4 +112,16 @@ net_stop() {
     done
 
     ip route flush cache
+}
+
+acl() {
+    if [ ! -f $BLACK_LIST ]; then
+        exit 1
+    fi
+
+    while read line;do
+        [ -z "$line" ] && continue
+        case "$line" in \#*) continue ;; esac
+        ipset $1 $SETNAME $line --exist
+    done < $BLACK_LIST
 }

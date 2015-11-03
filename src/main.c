@@ -263,8 +263,8 @@ main(int argc, char *argv[]) {
 
     uv_loop_t *loop = uv_default_loop();
     setup_signal(loop, signal_cb, tun);
-    tun_start(loop, tun);
-    uv_run(loop, UV_RUN_DEFAULT);
+
+    tun_start(tun);
 
     close_loop(loop);
     tun_free(tun);

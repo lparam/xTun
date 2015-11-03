@@ -21,7 +21,7 @@ enum tun_mode {
 struct tundev * tun_alloc(char *iface);
 void tun_free(struct tundev *tun);
 void tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode, struct sockaddr *addr);
-int tun_start(uv_loop_t *loop, struct tundev *tun);
+int tun_start(struct tundev *tun);
 void tun_stop(struct tundev *tun);
 
 #endif // for #ifndef TUN_H

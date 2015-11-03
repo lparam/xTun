@@ -339,7 +339,9 @@ tun_stop(struct tundev *tun) {
 }
 
 int
-tun_start(uv_loop_t *loop, struct tundev *tun) {
+tun_start(struct tundev *tun) {
+    uv_loop_t *loop = uv_default_loop();
+
     tun->inet.data = tun;
     tun->watcher.data = tun;
 
@@ -359,6 +361,8 @@ tun_start(uv_loop_t *loop, struct tundev *tun) {
 
     uv_poll_init(loop, &tun->watcher, tun->tunfd);
     uv_poll_start(&tun->watcher, UV_READABLE, poll_cb);
+
+    uv_run(loop, UV_RUN_DEFAULT);
 
     return 0;
 }

@@ -71,6 +71,11 @@ EXTRA_CFLAGS =
 
 CPPFLAGS += -Isrc
 CPPFLAGS += -I3rd/libuv/include -I3rd/libsodium/src/libsodium/include
+ifneq ($(OBJTREE),$(SRCTREE))
+CPPFLAGS += -I3rd/libsodium/src/libsodium/include/sodium
+CPPFLAGS += -I$(OBJTREE)/3rd/libsodium/src/libsodium/include
+endif
+CPPFLAGS += -fpic
 
 SHARED = -fPIC --shared
 
@@ -96,13 +101,15 @@ LDFLAGS += $(LIBS)
 
 XTUN=$(OBJTREE)/xTun
 XTUN_STATIC=$(OBJTREE)/libxTun.a
+XTUN_SHARED=$(OBJTREE)/libxTun.so
 
 #########################################################################
 include $(SRCTREE)/config.mk
 #########################################################################
 
-all: libuv libsodium $(XTUN)
+all: libuv libsodium $(XTUN) $(XTUN_SHARED)
 android: libuv libsodium $(XTUN_STATIC)
+so: libuv libsodium $(XTUN_SHARED)
 
 3rd/libuv/autogen.sh:
 	$(Q)git submodule update --init
@@ -135,19 +142,26 @@ $(XTUN): \
 	$(LINK) $^ -o $@ $(LDFLAGS)
 
 $(XTUN_STATIC): \
-	src/util.c \
-	src/logger.c \
-	src/crypto.c \
-	src/tun.c
+	$(OBJTREE)/src/util.o \
+	$(OBJTREE)/src/logger.o \
+	$(OBJTREE)/src/crypto.o \
+	$(OBJTREE)/src/tun.o
 	$(BUILD_AR) rcu $@ $^
 	$(BUILD_RANLIB) $@
+
+$(XTUN_SHARED): \
+	src/util.o \
+	src/logger.o \
+	src/crypto.o \
+	src/tun.o
+	$(LINK) $^ $(OBJTREE)/3rd/libuv/.libs/libuv.a $(OBJTREE)/3rd/libsodium/src/libsodium/.libs/libsodium.a -o $@ -shared
 
 clean:
 	@find $(OBJTREE)/src -type f \
 	\( -name '*.o' -o -name '*~' \
 	-o -name '*.tmp' \) -print \
 	| xargs rm -f
-	@rm -f $(XTUN) $(XTUN_STATIC)
+	@rm -f $(XTUN) $(XTUN_STATIC) $(XTUN_SHARED)
 
 distclean: clean
 	@find $(OBJTREE)/3rd/libcork $(OBJTREE)/3rd/libipset -type f \

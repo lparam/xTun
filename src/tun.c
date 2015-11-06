@@ -21,7 +21,6 @@
 struct tundev {
     char iface[128];
     char ifconf[128];
-    uint8_t hwaddr[6];
 	int tunfd;
     int mode;
     int mtu;
@@ -225,6 +224,7 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
     }
 }
 
+#ifndef ANDROID
 struct tundev *
 tun_alloc(char *iface) {
 	struct ifreq ifr;
@@ -251,6 +251,32 @@ tun_alloc(char *iface) {
 
 	return tun;
 }
+#else
+struct tundev *
+tun_alloc(int fd, int mtu, const char *server, const char *password) {
+    struct sockaddr addr;
+    int rc = resolve_addr(server, &addr);
+    if (rc) {
+        logger_stderr("invalid server address");
+        return NULL;
+    }
+    if (crypto_init(password)) {
+        logger_stderr("crypto init failed");
+        return NULL;
+    }
+
+    struct tundev *tun = malloc(sizeof(*tun));
+    memset(tun, 0, sizeof(*tun));
+    tun->tunfd = fd;
+    tun->mtu = mtu;
+    tun->server_addr = addr;
+    tun->mode = TUN_MODE_CLIENT;
+
+    verbose = 1;
+
+    return tun;
+}
+#endif
 
 void
 tun_free(struct tundev *tun) {
@@ -332,10 +358,12 @@ tun_stop(struct tundev *tun) {
     }
     uv_close((uv_handle_t *)&tun->inet, NULL);
     uv_poll_stop(&tun->watcher);
+#ifndef ANDROID
 	if(ioctl(tun->tunfd, TUNSETPERSIST, 0) < 0) {
         logger_stderr("ioctl(TUNSETPERSIST): %s", strerror(errno));
 		close(tun->tunfd);
 	}
+#endif
 }
 
 int

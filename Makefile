@@ -164,10 +164,6 @@ clean:
 	@rm -f $(XTUN) $(XTUN_STATIC) $(XTUN_SHARED)
 
 distclean: clean
-	@find $(OBJTREE)/3rd/libcork $(OBJTREE)/3rd/libipset -type f \
-	\( -name '*.o' -o -name '*~' \
-	-o -name '*.tmp' \) -print \
-	| xargs rm -f
 ifeq ($(OBJTREE)/3rd/libsodium/Makefile, $(wildcard $(OBJTREE)/3rd/libsodium/Makefile))
 	$(Q)cd $(OBJTREE)/3rd/libsodium && make distclean
 endif

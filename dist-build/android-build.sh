@@ -20,7 +20,7 @@ if [ ! -d $TOOLCHAIN_DIR ]; then
     bash $MAKE_TOOLCHAIN \
         --arch=$ARCH \
         --install-dir=$TOOLCHAIN_DIR \
-        --platform=android-9
+        --platform=android-21
 fi
 
 make CROSS="${HOST_COMPILER}-" O="${PREFIX}" android V=1

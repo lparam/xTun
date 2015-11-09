@@ -12,5 +12,6 @@
 void dump_hex(const void *data, uint32_t len, char *title);
 int resolve_addr(const char *buf, struct sockaddr *addr);
 int ip_name(const struct sockaddr *ip, char *name, size_t size);
+int add_route(const char *name, const char *address, int prefix);
 
 #endif // for #ifndef UTIL_H

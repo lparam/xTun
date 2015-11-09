@@ -9,7 +9,6 @@
 #include <sys/socket.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
-#include <linux/route.h>
 #include <netinet/ip.h>
 
 #include "uv.h"
@@ -285,58 +284,6 @@ tun_free(struct tundev *tun) {
     free(tun);
 }
 
-static int
-bind_to_interface(int socket, const char *name) {
-    if (setsockopt(socket, SOL_SOCKET, SO_BINDTODEVICE, name, strlen(name))) {
-        logger_log(LOG_INFO, "Cannot bind socket to %s: %s", name, strerror(errno));
-        return 1;
-    }
-    return 0;
-}
-
-static inline in_addr_t *
-as_in_addr(struct sockaddr *sa) {
-    return &((struct sockaddr_in *)sa)->sin_addr.s_addr;
-}
-
-static int
-set_route(const char *name, const char *address, int prefix) {
-    int rc = 0;
-    int inet4 = socket(AF_INET, SOCK_DGRAM, 0);
-
-    struct rtentry rt4;
-    memset(&rt4, 0, sizeof(rt4));
-    rt4.rt_dev = (char *)name;
-    rt4.rt_flags = RTF_UP;
-    rt4.rt_dst.sa_family = AF_INET;
-    rt4.rt_genmask.sa_family = AF_INET;
-
-    if (inet_pton(AF_INET, address, as_in_addr(&rt4.rt_dst)) != 1 ||
-            prefix < 0 || prefix > 32) {
-        rc = 1;
-    }
-
-    in_addr_t mask = prefix ? (~0 << (32 - prefix)) : 0x80000000;
-    *as_in_addr(&rt4.rt_genmask) = htonl(mask);
-    if (ioctl(inet4, SIOCADDRT, &rt4) && errno != EEXIST) {
-        rc = 1;
-    }
-
-    if (!prefix) {
-        // Split the route instead of replacing the default route.
-        *as_in_addr(&rt4.rt_dst) ^= htonl(0x80000000);
-        if (ioctl(inet4, SIOCADDRT, &rt4) && errno != EEXIST) {
-            rc = 1;
-        }
-    }
-
-    logger_log(LOG_INFO, "Route added on %s: %s/%d", name, address, prefix);
-
-    close(inet4);
-
-    return rc;
-}
-
 void
 tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode, struct sockaddr *addr) {
     strcpy(tun->ifconf, ifconf);
@@ -405,7 +352,6 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode, struct soc
 	}
 
     close(inet4);
-    set_route(tun->iface, "8.8.4.4", 32);
 }
 
 void

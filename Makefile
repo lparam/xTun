@@ -107,9 +107,9 @@ XTUN_SHARED=$(OBJTREE)/libxTun.so
 include $(SRCTREE)/config.mk
 #########################################################################
 
-all: libuv libsodium $(XTUN) $(XTUN_SHARED)
+all: libuv libsodium $(XTUN)
 android: libuv libsodium $(XTUN_STATIC)
-so: libuv libsodium $(XTUN_SHARED)
+share: libuv libsodium $(XTUN_SHARED)
 
 3rd/libuv/autogen.sh:
 	$(Q)git submodule update --init

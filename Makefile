@@ -108,7 +108,7 @@ include $(SRCTREE)/config.mk
 #########################################################################
 
 all: libuv libsodium $(XTUN)
-android: libuv libsodium $(XTUN_STATIC)
+android: libsodium $(XTUN_STATIC)
 share: libuv libsodium $(XTUN_SHARED)
 
 3rd/libuv/autogen.sh:
@@ -145,7 +145,6 @@ $(XTUN_STATIC): \
 	$(OBJTREE)/src/util.o \
 	$(OBJTREE)/src/logger.o \
 	$(OBJTREE)/src/crypto.o \
-	$(OBJTREE)/src/tun.o
 	$(BUILD_AR) rcu $@ $^
 	$(BUILD_RANLIB) $@
 

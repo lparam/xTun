@@ -20,11 +20,12 @@ enum tun_mode {
 
 #ifndef ANDROID
 struct tundev * tun_alloc(char *iface);
+void tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode, struct sockaddr *addr);
 #else
-struct tundev * tun_alloc(int fd, int mtu, const char *server, const char *password);
+struct tundev * tun_alloc(void);
+int tun_config(struct tundev *tun, int fd, int mtu, int verbose, const char *server, const char *dns);
 #endif
 void tun_free(struct tundev *tun);
-void tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode, struct sockaddr *addr);
 int tun_start(struct tundev *tun);
 void tun_stop(struct tundev *tun);
 

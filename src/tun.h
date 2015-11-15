@@ -23,7 +23,7 @@ struct tundev * tun_alloc(char *iface);
 void tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode, struct sockaddr *addr);
 #else
 struct tundev * tun_alloc(void);
-int tun_config(struct tundev *tun, int fd, int mtu, int verbose, const char *server, const char *dns);
+int tun_config(struct tundev *tun, int fd, int mtu, int globalProxy, int verbose, const char *server, const char *dns);
 #endif
 void tun_free(struct tundev *tun);
 int tun_start(struct tundev *tun);

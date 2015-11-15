@@ -10,12 +10,16 @@
 #include <linux/if.h>
 #include <linux/if_tun.h>
 #include <netinet/ip.h>
+#include <netinet/udp.h>
 
 #include "uv.h"
 #include "util.h"
 #include "logger.h"
 #include "crypto.h"
 #include "tun.h"
+#ifdef ANDROID
+#include "android.h"
+#endif
 
 
 struct tundev {
@@ -29,6 +33,8 @@ struct tundev {
     uv_udp_t inet;
     uv_poll_t watcher;
 #ifdef ANDROID
+    int is_global_proxy;
+    struct sockaddr dns_server;
     uv_async_t async_handle;
 #endif
 };
@@ -39,7 +45,6 @@ struct raddr {
 	struct raddr *next;
 };
 
-extern int protectSocket(int fd);
 #define HASHSIZE 256
 static struct raddr *raddrs[HASHSIZE];
 
@@ -207,6 +212,18 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
             addr = &ra->addr;
 
         } else {
+#ifdef ANDROID
+            if (!tun->is_global_proxy) {
+                uint16_t frag = iphdr->frag_off & htons(0x1fff);
+                if ((iphdr->protocol == IPPROTO_UDP) && (frag == 0)) {
+                    struct udphdr *udph = (struct udphdr *)(m + sizeof(struct iphdr));
+                    if (ntohs(udph->dest) == 53) {
+                        int rc = handle_local_dns_query(tun->tunfd, &tun->dns_server, m, mlen);
+                        if (rc) return;
+                    }
+                }
+            }
+#endif
             addr = &tun->server_addr;
         }
 
@@ -352,13 +369,17 @@ tun_close(uv_async_t *handle) {
     uv_close((uv_handle_t*) &tun->async_handle, NULL);
     uv_close((uv_handle_t *)&tun->inet, NULL);
 
+    if (!tun->is_global_proxy) {
+        clear_dns_query();
+    }
+
     free(tun);
 
     logger_log(LOG_WARNING, "xTun stoped.");
 }
 
 int
-tun_config(struct tundev *tun, int fd, int mtu, int v, const char *server, const char *dns) {
+tun_config(struct tundev *tun, int fd, int mtu, int global, int v, const char *server, const char *dns) {
     int rc;
     struct sockaddr addr;
 
@@ -368,11 +389,16 @@ tun_config(struct tundev *tun, int fd, int mtu, int v, const char *server, const
         return 1;
     }
 
+    struct sockaddr_in _dns_server;
+    uv_ip4_addr(dns, 53, &_dns_server);
+    tun->dns_server = *((struct sockaddr *)&_dns_server);
+
     verbose = v;
 
     tun->tunfd = fd;
     tun->mtu = mtu;
     tun->server_addr = addr;
+    tun->is_global_proxy = global;
 
     uv_async_init(uv_default_loop(), &tun->async_handle, tun_close);
     uv_unref((uv_handle_t*)&tun->async_handle);

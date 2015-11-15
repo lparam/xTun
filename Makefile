@@ -57,7 +57,7 @@ CFLAGS += -fomit-frame-pointer -fdata-sections -ffunction-sections
 
 ifneq (,$(findstring android,$(CROSS_COMPILE)))
 CPPFLAGS += -DANDROID
-CFLAGS += -pie -fPIE
+# CFLAGS += -pie -fPIE
 ANDROID = 1
 endif
 
@@ -75,7 +75,6 @@ ifneq ($(OBJTREE),$(SRCTREE))
 CPPFLAGS += -I3rd/libsodium/src/libsodium/include/sodium
 CPPFLAGS += -I$(OBJTREE)/3rd/libsodium/src/libsodium/include
 endif
-CPPFLAGS += -fpic
 
 SHARED = -fPIC --shared
 
@@ -145,6 +144,7 @@ $(XTUN_STATIC): \
 	$(OBJTREE)/src/util.o \
 	$(OBJTREE)/src/logger.o \
 	$(OBJTREE)/src/crypto.o \
+	$(OBJTREE)/src/android.o \
 	$(OBJTREE)/src/tun.o
 	$(BUILD_AR) rcu $@ $^
 	$(BUILD_RANLIB) $@

@@ -137,7 +137,7 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf, const struct 
 
         rc = crypto_decrypt(m, (uint8_t *)buf->base, nread);
         if (rc) {
-            logger_log(LOG_ERR, "Invalid udp packet");
+            logger_log(LOG_ERR, "Invalid packet");
             return;
         }
 
@@ -180,7 +180,7 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf, const struct 
 static void
 inet_send_cb(uv_udp_send_t *req, int status) {
     if (status) {
-        logger_log(LOG_ERR, "Forward to server failed: %s", uv_strerror(status));
+        logger_log(LOG_ERR, "Tun to network failed: %s", uv_strerror(status));
     }
     uv_buf_t *buf = (uv_buf_t *)(req + 1);
     free(buf->base);

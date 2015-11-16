@@ -144,6 +144,7 @@ $(XTUN_STATIC): \
 	$(OBJTREE)/src/util.o \
 	$(OBJTREE)/src/logger.o \
 	$(OBJTREE)/src/crypto.o \
+	$(OBJTREE)/src/checksum.o \
 	$(OBJTREE)/src/android.o \
 	$(OBJTREE)/src/tun.o
 	$(BUILD_AR) rcu $@ $^

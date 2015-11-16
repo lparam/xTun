@@ -74,9 +74,9 @@ clear_dns_query() {
         struct query_cache *cache  = caches[i];
         while (cache) {
             void *tmp = cache;
-            cache = cache->next;
             uv_close((uv_handle_t *)&cache->query->handle, NULL);
             free(cache->query);
+            cache = cache->next;
             free(tmp);
         }
 		caches[i] = NULL;
@@ -105,6 +105,7 @@ dns_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf, const struct s
         struct dns_query *query = container_of(handle, struct dns_query, handle);
         handle_local_dns_answer(query, (uint8_t*)buf->base, nread);
     }
+    free(buf->base);
 }
 
 int

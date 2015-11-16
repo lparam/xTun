@@ -25,6 +25,7 @@
 struct tundev {
     char iface[128];
     char ifconf[128];
+    uint8_t *network_buffer;
 	int tunfd;
     int mode;
     int mtu;
@@ -105,19 +106,39 @@ clear_addrs(struct raddr **addrs) {
 static void
 inet_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
     struct tundev *tun = (struct tundev *) handle->data;
-    buf->base = malloc(tun->mtu + PRIMITIVE_BYTES);
+    buf->base = (char *)tun->network_buffer;
     buf->len = tun->mtu + PRIMITIVE_BYTES;
+}
+
+static void
+network_to_tun(struct tundev *tun, uint8_t *buf, ssize_t len) {
+    for (;;) {
+        int rc = write(tun->tunfd, buf, len);
+        if (rc < 0) {
+            if (errno == EINTR) {
+                continue;
+            } else {
+                logger_log(LOG_ERR, "Write tun: %s", strerror(errno));
+                exit(1);
+            }
+
+        } else {
+            break;
+        }
+    }
 }
 
 static void
 inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf, const struct sockaddr *addr, unsigned flags) {
     if (nread > 0) {
+        int rc;
         uint8_t *m = (uint8_t *)buf->base;
         ssize_t mlen = nread - PRIMITIVE_BYTES;
-        int rc = crypto_decrypt(m, (uint8_t *)buf->base, nread);
+
+        rc = crypto_decrypt(m, (uint8_t *)buf->base, nread);
         if (rc) {
             logger_log(LOG_ERR, "Invalid udp packet");
-            goto err;
+            return;
         }
 
         if (verbose) {
@@ -152,24 +173,8 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf, const struct 
             }
         }
 
-        for (;;) {
-            int rc = write(tun->tunfd, m, mlen);
-            if (rc < 0) {
-                if (errno == EINTR) {
-                    continue;
-                } else {
-                    logger_log(LOG_ERR, "Write tun: %s", strerror(errno));
-                    exit(1);
-                }
-
-            } else {
-                break;
-            }
-        }
+        network_to_tun(tun, m, mlen);
     }
-
-err:
-    free(buf->base);
 }
 
 static void
@@ -180,6 +185,16 @@ inet_send_cb(uv_udp_send_t *req, int status) {
     uv_buf_t *buf = (uv_buf_t *)(req + 1);
     free(buf->base);
     free(req);
+}
+
+static void
+tun_to_network(struct tundev *tun, uint8_t *buf, int len, struct sockaddr *addr) {
+    uv_udp_send_t *write_req = malloc(sizeof(*write_req) + sizeof(uv_buf_t));
+    uv_buf_t *outbuf = (uv_buf_t *)(write_req + 1);
+    outbuf->base = (char *)buf;
+    outbuf->len = len;
+    write_req->data = tun;
+    uv_udp_send(write_req, &tun->inet, outbuf, 1, addr, inet_send_cb);
 }
 
 static void
@@ -237,13 +252,7 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
         }
 
         crypto_encrypt(tunbuf, m, mlen);
-
-        uv_udp_send_t *write_req = malloc(sizeof(*write_req) + sizeof(uv_buf_t));
-        uv_buf_t *outbuf = (uv_buf_t *)(write_req + 1);
-        outbuf->base = (char *)tunbuf;
-        outbuf->len = PRIMITIVE_BYTES + mlen;
-        write_req->data = tun;
-        uv_udp_send(write_req, &tun->inet, outbuf, 1, addr, inet_send_cb);
+        tun_to_network(tun, tunbuf, PRIMITIVE_BYTES + mlen, addr);
     }
 }
 
@@ -287,6 +296,7 @@ tun_alloc() {
 
 void
 tun_free(struct tundev *tun) {
+    free(tun->network_buffer);
     free(tun);
 }
 
@@ -301,6 +311,7 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode, struct soc
     } else {
         tun->bind_addr = *addr;
     }
+    tun->network_buffer = malloc(mtu + PRIMITIVE_BYTES);
 
 	char *nmask = strchr(ifconf, '/');
 	if(!nmask) {
@@ -365,14 +376,19 @@ static void
 tun_close(uv_async_t *handle) {
     struct tundev *tun = container_of(handle, struct tundev, async_handle);
 
+    logger_log(LOG_DEBUG, "Stop tun device...");
     uv_poll_stop(&tun->watcher);
+    logger_log(LOG_DEBUG, "Close async handle...");
     uv_close((uv_handle_t*) &tun->async_handle, NULL);
+    logger_log(LOG_DEBUG, "Close tun network...");
     uv_close((uv_handle_t *)&tun->inet, NULL);
 
+    logger_log(LOG_DEBUG, "Clean DNS query...");
     if (!tun->is_global_proxy) {
         clear_dns_query();
     }
 
+    logger_log(LOG_DEBUG, "Free tun...");
     free(tun);
 
     logger_log(LOG_WARNING, "xTun stoped.");
@@ -399,6 +415,7 @@ tun_config(struct tundev *tun, int fd, int mtu, int global, int v, const char *s
     tun->mtu = mtu;
     tun->server_addr = addr;
     tun->is_global_proxy = global;
+    tun->network_buffer = malloc(mtu + PRIMITIVE_BYTES);
 
     uv_async_init(uv_default_loop(), &tun->async_handle, tun_close);
     uv_unref((uv_handle_t*)&tun->async_handle);

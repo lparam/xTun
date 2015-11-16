@@ -376,19 +376,14 @@ static void
 tun_close(uv_async_t *handle) {
     struct tundev *tun = container_of(handle, struct tundev, async_handle);
 
-    logger_log(LOG_DEBUG, "Stop tun device...");
     uv_poll_stop(&tun->watcher);
-    logger_log(LOG_DEBUG, "Close async handle...");
     uv_close((uv_handle_t*) &tun->async_handle, NULL);
-    logger_log(LOG_DEBUG, "Close tun network...");
     uv_close((uv_handle_t *)&tun->inet, NULL);
 
-    logger_log(LOG_DEBUG, "Clean DNS query...");
     if (!tun->is_global_proxy) {
         clear_dns_query();
     }
 
-    logger_log(LOG_DEBUG, "Free tun...");
     free(tun);
 
     logger_log(LOG_WARNING, "xTun stoped.");
@@ -477,6 +472,7 @@ tun_start(struct tundev *tun) {
     } else {
         protectSocket(fd);
     }
+    logger_log(LOG_INFO, "xTun started.");
 #endif
 
     uv_poll_init(loop, &tun->watcher, tun->tunfd);

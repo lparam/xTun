@@ -193,8 +193,12 @@ tun_to_network(struct tundev *tun, uint8_t *buf, int len, struct sockaddr *addr)
     uv_buf_t *outbuf = (uv_buf_t *)(write_req + 1);
     outbuf->base = (char *)buf;
     outbuf->len = len;
-    write_req->data = tun;
-    uv_udp_send(write_req, &tun->inet, outbuf, 1, addr, inet_send_cb);
+    if (write_req) {
+        write_req->data = tun;
+        uv_udp_send(write_req, &tun->inet, outbuf, 1, addr, inet_send_cb);
+    } else {
+        free(buf);
+    }
 }
 
 static void

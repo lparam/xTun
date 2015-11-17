@@ -37,7 +37,7 @@ already_running(const char *pidfile) {
 	if (lockfile(fd) < 0) {
 		if (errno == EACCES || errno == EAGAIN) {
 			close(fd);
-			return(1);
+			return 1;
 		}
 		logger_stderr("can't lock %s: %s\n", pidfile, strerror(errno));
 		exit(1);
@@ -56,7 +56,9 @@ already_running(const char *pidfile) {
 		exit(1);
     }
 
-	return(0);
+    close(fd);
+
+	return 0;
 }
 
 void
@@ -97,6 +99,8 @@ daemonize(void) {
         dup2(fd, STDOUT_FILENO);
         /* dup2(fd, STDERR_FILENO); */
     }
+
+    close(fd);
 
     return 0;
 }

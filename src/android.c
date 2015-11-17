@@ -20,6 +20,7 @@ struct dns_query {
     struct iphdr iphdr;
     struct udphdr udphdr;
     uv_udp_t handle;
+    uv_timer_t *timer;
 };
 
 struct query_cache {
@@ -27,10 +28,17 @@ struct query_cache {
 	struct query_cache *next;
 };
 
+#define DNS_ANSWER_SIZE 1024
+#define TIMEOUT 60
 #define HASHSIZE 256
+
 static struct query_cache *caches[HASHSIZE];
 
+static void dns_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf);
+static void dns_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf, const struct sockaddr *addr, unsigned flags);
+static void close_query(struct dns_query *query);
 static void handle_local_dns_answer(struct dns_query *query, uint8_t *buf, size_t len);
+
 
 static uint16_t
 hash_query(uint16_t port) {
@@ -40,7 +48,7 @@ hash_query(uint16_t port) {
 }
 
 static struct query_cache *
-find_query(uint16_t port) {
+cache_lookup(uint16_t port) {
 	int h = hash_query(port);
 	struct query_cache *cache = caches[h];
 	if (cache == NULL)
@@ -59,7 +67,27 @@ find_query(uint16_t port) {
 }
 
 static void
-save_query(uint16_t port, struct dns_query *query) {
+cache_remove(uint16_t port) {
+	int h = hash_query(port);
+	struct query_cache *cache = caches[h];
+	if (cache == NULL)
+		return;
+	if (cache->query->udphdr.source == port) {
+		caches[h] = cache->next;
+		return;
+    }
+	struct query_cache *last = cache;
+	while (last->next) {
+		cache = last->next;
+        if (cache->query->udphdr.source == port) {
+			last->next = cache->next;
+		}
+		last = cache;
+	}
+}
+
+static void
+cache_insert(uint16_t port, struct dns_query *query) {
 	int h = hash_query(port);
 	struct query_cache *cache = malloc(sizeof(struct query_cache));
 	memset(cache, 0, sizeof(*cache));
@@ -74,8 +102,7 @@ clear_dns_query() {
         struct query_cache *cache  = caches[i];
         while (cache) {
             void *tmp = cache;
-            uv_close((uv_handle_t *)&cache->query->handle, NULL);
-            free(cache->query);
+            close_query(cache->query);
             cache = cache->next;
             free(tmp);
         }
@@ -83,16 +110,68 @@ clear_dns_query() {
 	}
 }
 
+static struct dns_query *
+new_query(int tunfd, struct iphdr *iphdr, struct udphdr *udphdr) {
+    struct dns_query *query = malloc(sizeof(struct dns_query));
+    memset(query, 0 , sizeof(struct dns_query));
+    query->iphdr = *iphdr;
+    query->udphdr = *udphdr;
+    query->tunfd = tunfd;
+    query->timer = malloc(sizeof(uv_timer_t));
+
+    uv_udp_init(uv_default_loop(), &query->handle);
+    uv_timer_init(uv_default_loop(), query->timer);
+    uv_udp_recv_start(&query->handle, dns_alloc_cb, dns_recv_cb);
+
+    uv_os_fd_t fd = 0;
+    int rc = uv_fileno((uv_handle_t*) &query->handle, &fd);
+    if (rc) {
+        logger_log(LOG_ERR, "Get fileno error: %s", uv_strerror(rc));
+        free(query->timer);
+        free(query);
+        return NULL;
+    } else {
+        protectSocket(fd);
+    }
+
+    return query;
+}
+
+static void
+timer_close_cb(uv_handle_t *handle) {
+    free(handle);
+}
+
+static void
+close_query(struct dns_query *query) {
+    uv_close((uv_handle_t *)&query->handle, NULL);
+    uv_close((uv_handle_t *)query->timer, timer_close_cb);
+    free(query);
+}
+
+static void
+timer_expire(uv_timer_t *handle) {
+    struct dns_query *query = handle->data;
+    cache_remove(query->udphdr.source);
+    close_query(query);
+}
+
+static void
+reset_timer(struct dns_query *query) {
+    query->timer->data = query;
+    uv_timer_start(query->timer, timer_expire, TIMEOUT * 1000, 0);
+}
+
 static void
 dns_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
-    buf->base = malloc(1024);
-    buf->len = 1024;
+    buf->base = malloc(DNS_ANSWER_SIZE);
+    buf->len = DNS_ANSWER_SIZE;
 }
 
 static void
 dns_send_cb(uv_udp_send_t *req, int status) {
     if (status) {
-        logger_log(LOG_ERR, "Forward to server failed: %s", uv_strerror(status));
+        logger_log(LOG_ERR, "DNS query failed: %s", uv_strerror(status));
     }
     uv_buf_t *buf = (uv_buf_t *)(req + 1);
     free(buf->base - sizeof(struct iphdr) - sizeof(struct udphdr) - PRIMITIVE_BYTES);
@@ -103,9 +182,19 @@ static void
 dns_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf, const struct sockaddr *addr, unsigned flags) {
     if (nread > 0) {
         struct dns_query *query = container_of(handle, struct dns_query, handle);
+        reset_timer(query);
         handle_local_dns_answer(query, (uint8_t*)buf->base, nread);
     }
     free(buf->base);
+}
+
+static void
+cache_log(struct iphdr *iphdr, struct udphdr *udphdr, struct sockaddr *server, const char *hint) {
+    char saddr[24] = {0}, daddr[30] = {0};
+    char *addr = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
+    strcpy(saddr, addr);
+    uv_ip4_name((const struct sockaddr_in *) server, daddr, sizeof(daddr));
+    logger_log(LOG_WARNING, "DNS Cache %s: %s:%d -> %s", hint, saddr, ntohs(udphdr->source), daddr);
 }
 
 int
@@ -123,39 +212,23 @@ handle_local_dns_query(int tunfd, struct sockaddr *dns_server, uint8_t *buf, int
     }
 
     struct dns_query *query = NULL;
-    struct query_cache *cache = find_query(udphdr->source);
+    struct query_cache *cache = cache_lookup(udphdr->source);
     if (cache == NULL) {
-        query = malloc(sizeof(struct dns_query));
-        memset(query, 0, sizeof(struct dns_query));
-        query->iphdr = *iphdr;
-        query->udphdr = *udphdr;
-        query->tunfd = tunfd;
-        save_query(udphdr->source, query);
-
-        uv_udp_init(uv_default_loop(), &query->handle);
-        uv_udp_recv_start(&query->handle, dns_alloc_cb, dns_recv_cb);
-
-        uv_os_fd_t fd = 0;
-        int rc = uv_fileno((uv_handle_t*) &query->handle, &fd);
-        if (rc) {
-            logger_log(LOG_ERR, "Get fileno error: %s", uv_strerror(rc));
-            free(query);
-            return 0;
+        query = new_query(tunfd, iphdr, udphdr);
+        if (query) {
+            cache_insert(udphdr->source, query);
         } else {
-            protectSocket(fd);
+            return 0;
         }
-
-        char saddr[24] = {0}, daddr[30] = {0};
-        char *addr = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
-        strcpy(saddr, addr);
-        uv_ip4_name((const struct sockaddr_in *) dns_server, daddr, sizeof(daddr));
-        logger_log(LOG_WARNING, "DNS Cache miss: %s:%d -> %s", saddr, ntohs(udphdr->source), daddr);
 
     } else {
         query = cache->query;
         query->iphdr = *iphdr;
         query->udphdr = *udphdr;
+        cache_log(iphdr, udphdr, dns_server, "hit");
     }
+
+    reset_timer(query);
 
     uv_udp_send_t *write_req = malloc(sizeof(*write_req) + sizeof(uv_buf_t));
     uv_buf_t *outbuf = (uv_buf_t *)(write_req + 1);
@@ -167,10 +240,11 @@ handle_local_dns_query(int tunfd, struct sockaddr *dns_server, uint8_t *buf, int
 }
 
 static void
-handle_local_dns_answer(struct dns_query *query, uint8_t *buf, size_t len) {
-    int dnsbuf_len = sizeof(struct iphdr) + sizeof(struct udphdr) + len;
-    uint8_t *dnsbuf = malloc(dnsbuf_len);
-    memset(dnsbuf, 0, dnsbuf_len);
+handle_local_dns_answer(struct dns_query *query, uint8_t *answer, size_t answer_len) {
+    int packet_len = sizeof(struct iphdr) + sizeof(struct udphdr) + answer_len;
+    uint8_t packet[packet_len];
+
+    memset(packet, 0, packet_len);
 
     struct iphdr iphdr;
     struct udphdr udphdr;
@@ -188,20 +262,20 @@ handle_local_dns_answer(struct dns_query *query, uint8_t *buf, size_t len) {
     iphdr.ttl = query->iphdr.ttl;
     iphdr.tos = query->iphdr.tos;
 
-    iphdr.tot_len = htons(sizeof(struct iphdr) + sizeof(struct udphdr) + len);
+    iphdr.tot_len = htons(sizeof(struct iphdr) + sizeof(struct udphdr) + answer_len);
     iphdr.check = checksum((uint16_t*)&iphdr, sizeof(struct iphdr));
 
     udphdr.dest = query->udphdr.source;
     udphdr.source = query->udphdr.dest;
-    udphdr.len = htons(sizeof(struct udphdr) + len);
-    udphdr.check = udp_checksum(&iphdr, &udphdr, buf, len);;
+    udphdr.len = htons(sizeof(struct udphdr) + answer_len);
+    udphdr.check = udp_checksum(&iphdr, &udphdr, answer, answer_len);;
 
-    memcpy(dnsbuf, &iphdr, sizeof(iphdr));
-    memcpy(dnsbuf + sizeof(iphdr), &udphdr, sizeof(udphdr));
-    memcpy(dnsbuf + sizeof(iphdr) + sizeof(udphdr), buf, len);
+    memcpy(packet, &iphdr, sizeof(iphdr));
+    memcpy(packet + sizeof(iphdr), &udphdr, sizeof(udphdr));
+    memcpy(packet + sizeof(iphdr) + sizeof(udphdr), answer, answer_len);
 
     for (;;) {
-        int rc = write(query->tunfd, dnsbuf, dnsbuf_len);
+        int rc = write(query->tunfd, packet, packet_len);
         if (rc < 0) {
             if (errno == EINTR) {
                 continue;

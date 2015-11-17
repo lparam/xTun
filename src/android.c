@@ -240,12 +240,7 @@ handle_local_dns_query(int tunfd, struct sockaddr *dns_server, uint8_t *buf, int
 }
 
 static void
-handle_local_dns_answer(struct dns_query *query, uint8_t *answer, size_t answer_len) {
-    int packet_len = sizeof(struct iphdr) + sizeof(struct udphdr) + answer_len;
-    uint8_t packet[packet_len];
-
-    memset(packet, 0, packet_len);
-
+create_dns_packet(struct dns_query *query, uint8_t *answer, ssize_t answer_len, uint8_t *packet) {
     struct iphdr iphdr;
     struct udphdr udphdr;
     memset(&iphdr, 0, sizeof(iphdr));
@@ -273,6 +268,14 @@ handle_local_dns_answer(struct dns_query *query, uint8_t *answer, size_t answer_
     memcpy(packet, &iphdr, sizeof(iphdr));
     memcpy(packet + sizeof(iphdr), &udphdr, sizeof(udphdr));
     memcpy(packet + sizeof(iphdr) + sizeof(udphdr), answer, answer_len);
+}
+
+static void
+handle_local_dns_answer(struct dns_query *query, uint8_t *answer, size_t answer_len) {
+    int packet_len = sizeof(struct iphdr) + sizeof(struct udphdr) + answer_len;
+    uint8_t packet[packet_len];
+
+    create_dns_packet(query, answer, answer_len, packet);
 
     for (;;) {
         int rc = write(query->tunfd, packet, packet_len);

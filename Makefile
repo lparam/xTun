@@ -22,8 +22,8 @@ endif # ifneq ($(BUILD_DIR),)
 
 INSTALL_DIR := /usr/local/bin
 
-OBJTREE		:= $(if $(BUILD_DIR),$(BUILD_DIR),$(CURDIR))
-SRCTREE		:= $(CURDIR)
+OBJTREE	:= $(if $(BUILD_DIR),$(BUILD_DIR),$(CURDIR))
+SRCTREE	:= $(CURDIR)
 export SRCTREE OBJTREE
 
 #########################################################################
@@ -36,9 +36,10 @@ endif
 ifdef CROSS
 CROSS_COMPILE = $(CROSS)
 HOST = $(patsubst %-,%,$(CROSS_COMPILE))
+endif
+
 ifneq (,$(findstring openwrt,$(CROSS_COMPILE)))
 OPENWRT = 1
-endif
 endif
 
 ifdef CROSS_COMPILE
@@ -55,7 +56,8 @@ CFLAGS = \
 CFLAGS += -fomit-frame-pointer -fdata-sections -ffunction-sections
 
 ifneq (,$(findstring android,$(CROSS_COMPILE)))
-CFLAGS += -pie -fPIE
+CPPFLAGS += -DANDROID
+# CFLAGS += -pie -fPIE
 ANDROID = 1
 endif
 
@@ -69,6 +71,12 @@ EXTRA_CFLAGS =
 
 CPPFLAGS += -Isrc
 CPPFLAGS += -I3rd/libuv/include -I3rd/libsodium/src/libsodium/include
+ifneq ($(OBJTREE),$(SRCTREE))
+CPPFLAGS += -I3rd/libsodium/src/libsodium/include/sodium
+CPPFLAGS += -I$(OBJTREE)/3rd/libsodium/src/libsodium/include
+endif
+
+SHARED = -fPIC --shared
 
 LDFLAGS = -Wl,--gc-sections
 
@@ -80,7 +88,7 @@ else
 	endif
 endif
 
-LIBS += 3rd/libuv/.libs/libuv.a 3rd/libsodium/src/libsodium/.libs/libsodium.a
+LIBS += $(OBJTREE)/3rd/libuv/.libs/libuv.a $(OBJTREE)/3rd/libsodium/src/libsodium/.libs/libsodium.a
 
 ifdef MINGW32
 LIBS += -lws2_32 -lpsapi -liphlpapi -luserenv
@@ -90,48 +98,79 @@ endif
 
 LDFLAGS += $(LIBS)
 
+XTUN=$(OBJTREE)/xTun
+XTUN_STATIC=$(OBJTREE)/libxTun.a
+XTUN_SHARED=$(OBJTREE)/libxTun.so
+
 #########################################################################
 include $(SRCTREE)/config.mk
 #########################################################################
 
-all: libuv libsodium xTun
+all: libuv libsodium $(XTUN)
+android: libuv libsodium $(XTUN_STATIC)
+share: libuv libsodium $(XTUN_SHARED)
 
 3rd/libuv/autogen.sh:
 	$(Q)git submodule update --init
 
-3rd/libuv/Makefile: | 3rd/libuv/autogen.sh
-	$(Q)cd 3rd/libuv && ./autogen.sh && ./configure --host=$(HOST) LDFLAGS= && $(MAKE)
+$(OBJTREE)/3rd/libuv/Makefile: | 3rd/libuv/autogen.sh
+	$(Q)mkdir -p $(OBJTREE)/3rd/libuv
+	$(Q)cd 3rd/libuv && ./autogen.sh
+	$(Q)cd $(OBJTREE)/3rd/libuv && $(SRCTREE)/3rd/libuv/configure --host=$(HOST) LDFLAGS= && $(MAKE)
 
-libuv: 3rd/libuv/Makefile
+libuv: $(OBJTREE)/3rd/libuv/Makefile
 
 3rd/libsodium/autogen.sh:
 	$(Q)git submodule update --init
 
-3rd/libsodium/Makefile: | 3rd/libsodium/autogen.sh
-	$(Q)cd 3rd/libsodium && ./autogen.sh && ./configure --host=$(HOST) LDFLAGS= && $(MAKE)
+$(OBJTREE)/3rd/libsodium/Makefile: | 3rd/libsodium/autogen.sh
+	$(Q)mkdir -p $(OBJTREE)/3rd/libsodium
+	$(Q)cd 3rd/libsodium && ./autogen.sh
+	$(Q)cd $(OBJTREE)/3rd/libsodium && $(SRCTREE)/3rd/libsodium/configure --host=$(HOST) LDFLAGS= && $(MAKE)
 
-libsodium: 3rd/libsodium/Makefile
+libsodium: $(OBJTREE)/3rd/libsodium/Makefile
 
-xTun: \
+$(XTUN): \
+	$(OBJTREE)/src/util.o \
+	$(OBJTREE)/src/logger.o \
+	$(OBJTREE)/src/daemon.o \
+	$(OBJTREE)/src/signal.o \
+	$(OBJTREE)/src/crypto.o \
+	$(OBJTREE)/src/tun.o \
+	$(OBJTREE)/src/main.o
+	$(LINK) $^ -o $@ $(LDFLAGS)
+
+$(XTUN_STATIC): \
+	$(OBJTREE)/src/util.o \
+	$(OBJTREE)/src/logger.o \
+	$(OBJTREE)/src/crypto.o \
+	$(OBJTREE)/src/checksum.o \
+	$(OBJTREE)/src/android.o \
+	$(OBJTREE)/src/tun.o
+	$(BUILD_AR) rcu $@ $^
+	$(BUILD_RANLIB) $@
+
+$(XTUN_SHARED): \
 	src/util.o \
 	src/logger.o \
-	src/daemon.o \
-	src/signal.o \
 	src/crypto.o \
-	src/tun.o \
-	src/main.o
-	$(LINK) $^ -o $(OBJTREE)/$@ $(LDFLAGS)
+	src/tun.o
+	$(LINK) $^ $(OBJTREE)/3rd/libuv/.libs/libuv.a $(OBJTREE)/3rd/libsodium/src/libsodium/.libs/libsodium.a -o $@ -shared
 
 clean:
 	@find $(OBJTREE)/src -type f \
-	\( -name '*.bak' -o -name '*~' \
-	-o -name '*.o' -o -name '*.tmp' \) -print \
+	\( -name '*.o' -o -name '*~' \
+	-o -name '*.tmp' \) -print \
 	| xargs rm -f
-	@rm -f xTun
+	@rm -f $(XTUN) $(XTUN_STATIC) $(XTUN_SHARED)
 
 distclean: clean
-	$(Q)cd 3rd/libsodium && make distclean
-	$(Q)cd 3rd/libuv && make distclean
+ifeq ($(OBJTREE)/3rd/libsodium/Makefile, $(wildcard $(OBJTREE)/3rd/libsodium/Makefile))
+	$(Q)cd $(OBJTREE)/3rd/libsodium && make distclean
+endif
+ifeq ($(OBJTREE)/3rd/libuv/Makefile, $(wildcard $(OBJTREE)/3rd/libuv/Makefile))
+	$(Q)cd $(OBJTREE)/3rd/libuv && make distclean
+endif
 
 ifndef CROSS_COMPILE
 install:

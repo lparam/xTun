@@ -152,7 +152,7 @@ close_walk_cb(uv_handle_t *handle, void *arg) {
     }
 }
 
-void
+static void
 close_loop(uv_loop_t *loop) {
     uv_walk(loop, close_walk_cb, NULL);
     uv_run(loop, UV_RUN_DEFAULT);
@@ -263,8 +263,8 @@ main(int argc, char *argv[]) {
 
     uv_loop_t *loop = uv_default_loop();
     setup_signal(loop, signal_cb, tun);
-    tun_start(loop, tun);
-    uv_run(loop, UV_RUN_DEFAULT);
+
+    tun_start(tun);
 
     close_loop(loop);
     tun_free(tun);

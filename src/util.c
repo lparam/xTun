@@ -1,8 +1,17 @@
 #include <stdio.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
 #include <ctype.h>
+#include <assert.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <linux/if.h>
+#include <linux/if_tun.h>
+#include <linux/route.h>
+#include <netinet/ip.h>
 
 #include "uv.h"
 #include "logger.h"
@@ -182,4 +191,44 @@ ip_name(const struct sockaddr *ip, char *name, size_t size) {
         port = ntohs(((const struct sockaddr_in6*)ip)->sin6_port);
     }
     return port;
+}
+
+static inline in_addr_t *
+as_in_addr(struct sockaddr *sa) {
+    return &((struct sockaddr_in *)sa)->sin_addr.s_addr;
+}
+
+int
+add_route(const char *name, const char *address, int prefix) {
+    int rc = 0;
+    int inet4 = socket(AF_INET, SOCK_DGRAM, 0);
+
+    struct rtentry rt4;
+    memset(&rt4, 0, sizeof(rt4));
+    rt4.rt_dev = (char *)name;
+    rt4.rt_flags = RTF_UP;
+    rt4.rt_dst.sa_family = AF_INET;
+    rt4.rt_genmask.sa_family = AF_INET;
+
+    if (inet_pton(AF_INET, address, as_in_addr(&rt4.rt_dst)) != 1 ||
+            prefix < 0 || prefix > 32) {
+        rc = 1;
+    }
+
+    in_addr_t mask = prefix ? (~0 << (32 - prefix)) : 0x80000000;
+    *as_in_addr(&rt4.rt_genmask) = htonl(mask);
+    if (ioctl(inet4, SIOCADDRT, &rt4) && errno != EEXIST) {
+        rc = 1;
+    }
+
+    if (!prefix) {
+        // Split the route instead of replacing the default route.
+        *as_in_addr(&rt4.rt_dst) ^= htonl(0x80000000);
+        if (ioctl(inet4, SIOCADDRT, &rt4) && errno != EEXIST) {
+            rc = 1;
+        }
+    }
+
+    close(inet4);
+    return rc;
 }

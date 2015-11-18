@@ -1,3 +1,8 @@
+v0.3.0 (2015-11-18)
+-----------
+* Feature: Android support
+
+
 v0.2.0 (2015-8-29)
 -----------
 * Feature: Openwrt support

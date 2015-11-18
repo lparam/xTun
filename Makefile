@@ -1,6 +1,6 @@
 MAJOR = 0
-MINOR = 2
-PATCH = 1
+MINOR = 3
+PATCH = 0
 NAME = xTun
 
 ifdef O
@@ -57,7 +57,6 @@ CFLAGS += -fomit-frame-pointer -fdata-sections -ffunction-sections
 
 ifneq (,$(findstring android,$(CROSS_COMPILE)))
 CPPFLAGS += -DANDROID
-# CFLAGS += -pie -fPIE
 ANDROID = 1
 endif
 
@@ -75,8 +74,6 @@ ifneq ($(OBJTREE),$(SRCTREE))
 CPPFLAGS += -I3rd/libsodium/src/libsodium/include/sodium
 CPPFLAGS += -I$(OBJTREE)/3rd/libsodium/src/libsodium/include
 endif
-
-SHARED = -fPIC --shared
 
 LDFLAGS = -Wl,--gc-sections
 
@@ -100,7 +97,6 @@ LDFLAGS += $(LIBS)
 
 XTUN=$(OBJTREE)/xTun
 XTUN_STATIC=$(OBJTREE)/libxTun.a
-XTUN_SHARED=$(OBJTREE)/libxTun.so
 
 #########################################################################
 include $(SRCTREE)/config.mk
@@ -108,7 +104,6 @@ include $(SRCTREE)/config.mk
 
 all: libuv libsodium $(XTUN)
 android: libuv libsodium $(XTUN_STATIC)
-share: libuv libsodium $(XTUN_SHARED)
 
 3rd/libuv/autogen.sh:
 	$(Q)git submodule update --init
@@ -150,19 +145,12 @@ $(XTUN_STATIC): \
 	$(BUILD_AR) rcu $@ $^
 	$(BUILD_RANLIB) $@
 
-$(XTUN_SHARED): \
-	src/util.o \
-	src/logger.o \
-	src/crypto.o \
-	src/tun.o
-	$(LINK) $^ $(OBJTREE)/3rd/libuv/.libs/libuv.a $(OBJTREE)/3rd/libsodium/src/libsodium/.libs/libsodium.a -o $@ -shared
-
 clean:
 	@find $(OBJTREE)/src -type f \
 	\( -name '*.o' -o -name '*~' \
 	-o -name '*.tmp' \) -print \
 	| xargs rm -f
-	@rm -f $(XTUN) $(XTUN_STATIC) $(XTUN_SHARED)
+	@rm -f $(XTUN) $(XTUN_STATIC)
 
 distclean: clean
 ifeq ($(OBJTREE)/3rd/libsodium/Makefile, $(wildcard $(OBJTREE)/3rd/libsodium/Makefile))

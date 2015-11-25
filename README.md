@@ -32,7 +32,7 @@ Usage
 ### Server
 
 ```bash
-xTun -i IFACE -I IP/MASK -c server -k PASSWORD
+xTun -i IFACE -I IP/MASK -m server -k PASSWORD
 scripts/server_up.sh
 ```
 
@@ -45,7 +45,7 @@ scripts/server_down.sh
 ### Client
 
 ```bash
-xTun -i IFACE -I IP/MASK -c client -k PASSWORD -s SERVER
+xTun -i IFACE -I IP/MASK -m client -k PASSWORD -s SERVER
 scripts/client_up.sh
 ```
 

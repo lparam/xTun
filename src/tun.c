@@ -38,6 +38,10 @@ struct tundev {
     struct sockaddr dns_server;
     uv_async_t async_handle;
 #endif
+#ifdef IFF_MULTI_QUEUE
+    int queues;
+    int fds[0];
+#endif
 };
 
 struct raddr {
@@ -263,30 +267,38 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
 #ifndef ANDROID
 struct tundev *
 tun_alloc(char *iface) {
-	int fd;
+    int fd, err, i;
+    int queues = 2;
 
-	if ((fd = open("/dev/net/tun", O_RDWR | O_NONBLOCK)) < 0 ) {
-        logger_stderr("Open /dev/net/tun: %s", strerror(errno));
-        exit(1);
-	}
-
-	struct ifreq ifr;
-	memset(&ifr, 0, sizeof ifr);
-
-    // Allocate interface
-	ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
-	if (ioctl(fd, TUNSETIFF, (void *)&ifr)) {
-        logger_stderr("Cannot allocate TUN: %s", strerror(errno));
-		close(fd);
-        exit(1);
-	}
-
-    struct tundev *tun = malloc(sizeof(*tun));
-    memset(tun, 0, sizeof(*tun));
-    tun->tunfd = fd;
+    struct tundev *tun = malloc(sizeof(*tun) + sizeof(int) * queues);
+    memset(tun, 0, sizeof(*tun) + sizeof(int) * queues);
+    tun->queues = queues;
     strcpy(tun->iface, iface);
 
-	return tun;
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof ifr);
+    ifr.ifr_flags = IFF_TUN | IFF_NO_PI | IFF_MULTI_QUEUE;
+
+    for (i = 0; i < queues; i++) {
+        if ((fd = open("/dev/net/tun", O_RDWR | O_NONBLOCK)) < 0 ) {
+            logger_stderr("Open /dev/net/tun: %s", strerror(errno));
+            goto err;
+        }
+        err = ioctl(fd, TUNSETIFF, (void *)&ifr);
+        if (err) {
+            logger_stderr("Cannot allocate TUN: %s", strerror(errno));
+            close(fd);
+            goto err;
+        }
+        tun->fds[i] = fd;
+    }
+
+    return tun;
+err:
+    for (--i; i >= 0; i--) {
+        close(tun->fds[i]);
+    }
+    return NULL;
 }
 #else
 struct tundev *

@@ -7,7 +7,12 @@
 #define xTun_VERSION      "0.3.0"
 #define xTun_VER          "xTun/" xTun_VERSION
 
+/* MTU of VPN tunnel device. Use the following formula to calculate:
+   1492 (Ethernet) - 20 (IPv4, or 40 for IPv6) - 8 (UDP) - 24 (xTun) */
+#define MTU 1440
+
 #define PRIMITIVE_BYTES 24
+
 
 int verbose;
 

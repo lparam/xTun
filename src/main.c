@@ -11,11 +11,6 @@
 #include "tun.h"
 
 
-/* MTU of VPN tunnel device. Use the following formula to calculate:
-   1492 (Ethernet) - 20 (IPv4, or 40 for IPv6) - 8 (UDP) - 24 (xTun) */
-#define MTU 1440
-
-
 static int mtu = MTU;
 static int daemon_mode = 1;
 static int mode;
@@ -26,11 +21,6 @@ static char *bind_addrbuf = "0.0.0.0:1082";
 static char *pidfile = "/var/run/xTun.pid";
 static char *password = NULL;
 static char *xsignal;
-
-struct signal_ctx {
-    int signum;
-    uv_signal_t sig;
-} signals[3];
 
 int signal_process(char *signal, const char *pidfile);
 
@@ -145,52 +135,6 @@ parse_opts(int argc, char *argv[]) {
     }
 }
 
-static void
-close_walk_cb(uv_handle_t *handle, void *arg) {
-    if (!uv_is_closing(handle)) {
-        uv_close(handle, NULL);
-    }
-}
-
-static void
-close_loop(uv_loop_t *loop) {
-    uv_walk(loop, close_walk_cb, NULL);
-    uv_run(loop, UV_RUN_DEFAULT);
-    uv_loop_close(loop);
-}
-
-static void
-close_signal() {
-    for (int i = 0; i < 2; i++) {
-        uv_signal_stop(&signals[i].sig);
-    }
-}
-
-static void
-signal_cb(uv_signal_t *handle, int signum) {
-    if (signum == SIGINT || signum == SIGQUIT) {
-        char *name = signum == SIGINT ? "SIGINT" : "SIGQUIT";
-        logger_log(LOG_INFO, "Received %s, scheduling shutdown...", name);
-
-        close_signal();
-
-        struct tundev *tun = handle->data;
-        tun_stop(tun);
-    }
-}
-
-static void
-setup_signal(uv_loop_t *loop, uv_signal_cb cb, void *data) {
-    signals[0].signum = SIGINT;
-    signals[1].signum = SIGQUIT;
-    signals[2].signum = SIGTERM;
-    for (int i = 0; i < 2; i++) {
-        signals[i].sig.data = data;
-        uv_signal_init(loop, &signals[i].sig);
-        uv_signal_start(&signals[i].sig, cb, signals[i].signum);
-    }
-}
-
 static int
 init() {
     logger_init(daemon_mode);
@@ -259,14 +203,13 @@ main(int argc, char *argv[]) {
     }
 
 	struct tundev *tun = tun_alloc(iface);
+    if (!tun) {
+        return 1;
+    }
+
     tun_config(tun, ifconf, mtu, mode, &addr);
-
-    uv_loop_t *loop = uv_default_loop();
-    setup_signal(loop, signal_cb, tun);
-
     tun_start(tun);
 
-    close_loop(loop);
     tun_free(tun);
     if (daemon_mode) {
         delete_pidfile(pidfile);

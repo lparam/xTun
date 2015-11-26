@@ -22,26 +22,31 @@
 #endif
 
 
+struct tundev_context {
+	int tunfd;
+    int inet_fd;
+    uint8_t *network_buffer;
+    uv_udp_t inet;
+    uv_poll_t watcher;
+    uv_sem_t semaphore;
+    uv_async_t async_handle;
+    struct tundev *tun;
+};
+
 struct tundev {
     char iface[128];
     char ifconf[128];
-    uint8_t *network_buffer;
-	int tunfd;
     int mode;
     int mtu;
     struct sockaddr bind_addr;
     struct sockaddr server_addr;
-    uv_udp_t inet;
-    uv_poll_t watcher;
 #ifdef ANDROID
     int is_global_proxy;
     struct sockaddr dns_server;
     uv_async_t async_handle;
 #endif
-#ifdef IFF_MULTI_QUEUE
     int queues;
-    int fds[0];
-#endif
+    struct tundev_context contexts[0];
 };
 
 struct raddr {
@@ -52,6 +57,15 @@ struct raddr {
 
 #define HASHSIZE 256
 static struct raddr *raddrs[HASHSIZE];
+
+struct signal_ctx {
+    int signum;
+    uv_signal_t sig;
+} signals[3];
+
+static void loop_close(uv_loop_t *loop);
+static void signal_cb(uv_signal_t *handle, int signum);
+static void signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data);
 
 
 static uint32_t
@@ -109,15 +123,15 @@ clear_addrs(struct raddr **addrs) {
 
 static void
 inet_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
-    struct tundev *tun = (struct tundev *) handle->data;
-    buf->base = (char *)tun->network_buffer;
-    buf->len = tun->mtu + PRIMITIVE_BYTES;
+    struct tundev_context *ctx = container_of(handle, struct tundev_context, inet);
+    buf->base = (char *)ctx->network_buffer;
+    buf->len = ctx->tun->mtu + PRIMITIVE_BYTES;
 }
 
 static void
-network_to_tun(struct tundev *tun, uint8_t *buf, ssize_t len) {
+network_to_tun(int tunfd, uint8_t *buf, ssize_t len) {
     for (;;) {
-        int rc = write(tun->tunfd, buf, len);
+        int rc = write(tunfd, buf, len);
         if (rc < 0) {
             if (errno == EINTR) {
                 continue;
@@ -155,7 +169,8 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf, const struct 
             logger_log(LOG_INFO, "Received %ld bytes from %s to %s", mlen, saddr, daddr);
         }
 
-        struct tundev *tun = handle->data;
+        struct tundev_context *ctx = container_of(handle, struct tundev_context, inet);
+        struct tundev *tun = ctx->tun;
 
         if (tun->mode == TUN_MODE_SERVER) {
             // TODO: Compare source address
@@ -177,7 +192,7 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf, const struct 
             }
         }
 
-        network_to_tun(tun, m, mlen);
+        network_to_tun(ctx->tunfd, m, mlen);
     }
 }
 
@@ -192,14 +207,14 @@ inet_send_cb(uv_udp_send_t *req, int status) {
 }
 
 static void
-tun_to_network(struct tundev *tun, uint8_t *buf, int len, struct sockaddr *addr) {
+tun_to_network(struct tundev_context *ctx, uint8_t *buf, int len, struct sockaddr *addr) {
     uv_udp_send_t *write_req = malloc(sizeof(*write_req) + sizeof(uv_buf_t));
     uv_buf_t *outbuf = (uv_buf_t *)(write_req + 1);
     outbuf->base = (char *)buf;
     outbuf->len = len;
     if (write_req) {
-        write_req->data = tun;
-        uv_udp_send(write_req, &tun->inet, outbuf, 1, addr, inet_send_cb);
+        write_req->data = ctx;
+        uv_udp_send(write_req, &ctx->inet, outbuf, 1, addr, inet_send_cb);
     } else {
         free(buf);
     }
@@ -209,10 +224,11 @@ static void
 poll_cb(uv_poll_t *watcher, int status, int events) {
     if (events == UV_READABLE) {
         struct sockaddr *addr;
-        struct tundev *tun = container_of(watcher, struct tundev, watcher);
+        struct tundev_context *ctx = container_of(watcher, struct tundev_context, watcher);
+        struct tundev *tun = ctx->tun;
         uint8_t *tunbuf = malloc(PRIMITIVE_BYTES + tun->mtu);
         uint8_t *m = tunbuf + PRIMITIVE_BYTES;
-        int mlen = read(tun->tunfd, m, tun->mtu);
+        int mlen = read(ctx->tunfd, m, tun->mtu);
 
         if (mlen <= 0) {
             free(tunbuf);
@@ -260,7 +276,7 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
         }
 
         crypto_encrypt(tunbuf, m, mlen);
-        tun_to_network(tun, tunbuf, PRIMITIVE_BYTES + mlen, addr);
+        tun_to_network(ctx, tunbuf, PRIMITIVE_BYTES + mlen, addr);
     }
 }
 
@@ -270,8 +286,8 @@ tun_alloc(char *iface) {
     int fd, err, i;
     int queues = 2;
 
-    struct tundev *tun = malloc(sizeof(*tun) + sizeof(int) * queues);
-    memset(tun, 0, sizeof(*tun) + sizeof(int) * queues);
+    struct tundev *tun = malloc(sizeof(*tun) + sizeof(struct tundev_context) * queues);
+    memset(tun, 0, sizeof(*tun) + sizeof(struct tundev_context) * queues);
     tun->queues = queues;
     strcpy(tun->iface, iface);
 
@@ -290,14 +306,20 @@ tun_alloc(char *iface) {
             close(fd);
             goto err;
         }
-        tun->fds[i] = fd;
+        struct tundev_context *ctx = &tun->contexts[i];
+        ctx->tun = tun;
+        ctx->tunfd = fd;
+        ctx->inet_fd = create_socket(SOCK_DGRAM, 1);
     }
 
     return tun;
 err:
     for (--i; i >= 0; i--) {
-        close(tun->fds[i]);
+        struct tundev_context *ctx = &tun->contexts[i];
+        close(ctx->tunfd);
+        close(ctx->inet_fd);
     }
+    free(tun);
     return NULL;
 }
 #else
@@ -312,7 +334,10 @@ tun_alloc() {
 
 void
 tun_free(struct tundev *tun) {
-    free(tun->network_buffer);
+    int i;
+    for (i = 0; i < tun->queues; i++) {
+        free(tun->contexts[i].network_buffer);
+    }
     free(tun);
 }
 
@@ -322,12 +347,12 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode, struct soc
     strcpy(tun->ifconf, ifconf);
     tun->mtu = mtu;
     tun->mode = mode;
+
     if (mode == TUN_MODE_CLIENT) {
         tun->server_addr = *addr;
     } else {
         tun->bind_addr = *addr;
     }
-    tun->network_buffer = malloc(mtu + PRIMITIVE_BYTES);
 
 	char *nmask = strchr(ifconf, '/');
 	if(!nmask) {
@@ -386,6 +411,12 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode, struct soc
 	}
 
     close(inet4);
+
+    int i;
+    for (i = 0; i < tun->queues; i++) {
+        struct tundev_context *ctx = &tun->contexts[i];
+        ctx->network_buffer = malloc(mtu + PRIMITIVE_BYTES);
+    }
 }
 #else
 static void
@@ -429,7 +460,7 @@ tun_config(struct tundev *tun, int fd, int mtu, int global, int v, const char *s
     tun->network_buffer = malloc(mtu + PRIMITIVE_BYTES);
 
     uv_async_init(uv_default_loop(), &tun->async_handle, tun_close);
-    uv_unref((uv_handle_t*)&tun->async_handle);
+    uv_unref((uv_handle_t *)&tun->async_handle);
 
     return 0;
 }
@@ -442,13 +473,24 @@ tun_stop(struct tundev *tun) {
         clear_addrs(raddrs);
     }
 
-    uv_close((uv_handle_t *)&tun->inet, NULL);
-    uv_poll_stop(&tun->watcher);
+    if (tun->queues > 1) {
+        int i;
+        for (i = 0; i < tun->queues; i++) {
+            struct tundev_context *ctx = &tun->contexts[i];
+            uv_async_send(&ctx->async_handle);
+        }
 
-	if(ioctl(tun->tunfd, TUNSETPERSIST, 0) < 0) {
-        logger_stderr("ioctl(TUNSETPERSIST): %s", strerror(errno));
-		close(tun->tunfd);
-	}
+    } else {
+        struct tundev_context *ctx = tun->contexts;
+        uv_close((uv_handle_t *)&ctx->inet, NULL);
+        uv_poll_stop(&ctx->watcher);
+        // valgrind may generate a false alarm here
+        if(ioctl(ctx->tunfd, TUNSETPERSIST, 0) < 0) {
+            logger_stderr("ioctl(TUNSETPERSIST): %s", strerror(errno));
+        }
+        close(ctx->tunfd);
+    }
+
 }
 #else
 void
@@ -457,44 +499,167 @@ tun_stop(struct tundev *tun) {
 }
 #endif
 
-int
-tun_start(struct tundev *tun) {
-    uv_loop_t *loop = uv_default_loop();
+static void
+queue_close(uv_async_t *handle) {
+    struct tundev_context *ctx = container_of(handle, struct tundev_context, async_handle);
+    uv_close((uv_handle_t *)&ctx->inet, NULL);
+    uv_close((uv_handle_t *)&ctx->async_handle, NULL);
+    uv_poll_stop(&ctx->watcher);
+    // valgrind may generate a false alarm here
+    if(ioctl(ctx->tunfd, TUNSETPERSIST, 0) < 0) {
+        logger_stderr("ioctl(TUNSETPERSIST): %s", strerror(errno));
+        close(ctx->tunfd);
+    }
+}
 
-    tun->inet.data = tun;
-    tun->watcher.data = tun;
+static void
+queue_start(void *arg) {
+    int rc;
+    uv_loop_t loop;
+    struct tundev *tun;
+    struct tundev_context *ctx;
 
-    uv_udp_init(loop, &tun->inet);
+    ctx = arg;
+    tun = ctx->tun;
+
+    uv_loop_init(&loop);
+    uv_async_init(&loop, &ctx->async_handle, queue_close);
+    uv_udp_init(&loop, &ctx->inet);
+
+    if ((rc = uv_udp_open(&ctx->inet, ctx->inet_fd))) {
+        logger_stderr("UDP open error: %s - %d", uv_strerror(rc), ctx->inet_fd);
+        exit(1);
+    }
+
     if (tun->mode == TUN_MODE_SERVER) {
-        for (int i = 0; i < HASHSIZE; i++) {
-            raddrs[i] = NULL;
-        }
-
-        int rc = uv_udp_bind(&tun->inet, &tun->bind_addr, UV_UDP_REUSEADDR);
+        rc = uv_udp_bind(&ctx->inet, &tun->bind_addr, UV_UDP_REUSEADDR);
         if (rc) {
             logger_stderr("bind error: %s", uv_strerror(rc));
-            return 1;
+            exit(1);
         }
     }
 
-    uv_udp_recv_start(&tun->inet, inet_alloc_cb, inet_recv_cb);
+    uv_udp_recv_start(&ctx->inet, inet_alloc_cb, inet_recv_cb);
+
+    uv_poll_init(&loop, &ctx->watcher, ctx->tunfd);
+    uv_poll_start(&ctx->watcher, UV_READABLE, poll_cb);
+
+    uv_run(&loop, UV_RUN_DEFAULT);
+
+    loop_close(&loop);
+    uv_sem_post(&ctx->semaphore);
+}
+
+static void
+walk_close_cb(uv_handle_t *handle, void *arg) {
+    if (!uv_is_closing(handle)) {
+        uv_close(handle, NULL);
+    }
+}
+
+static void
+loop_close(uv_loop_t *loop) {
+    uv_walk(loop, walk_close_cb, NULL);
+    uv_run(loop, UV_RUN_DEFAULT);
+    uv_loop_close(loop);
+}
+
+static void
+signal_close() {
+    for (int i = 0; i < 2; i++) {
+        uv_signal_stop(&signals[i].sig);
+    }
+}
+
+static void
+signal_cb(uv_signal_t *handle, int signum) {
+    if (signum == SIGINT || signum == SIGQUIT) {
+        char *name = signum == SIGINT ? "SIGINT" : "SIGQUIT";
+        logger_log(LOG_INFO, "Received %s, scheduling shutdown...", name);
+
+        signal_close();
+
+        struct tundev *tun = handle->data;
+        tun_stop(tun);
+    }
+}
+
+static void
+signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data) {
+    signals[0].signum = SIGINT;
+    signals[1].signum = SIGQUIT;
+    signals[2].signum = SIGTERM;
+    for (int i = 0; i < 2; i++) {
+        signals[i].sig.data = data;
+        uv_signal_init(loop, &signals[i].sig);
+        uv_signal_start(&signals[i].sig, cb, signals[i].signum);
+    }
+}
+
+int
+tun_start(struct tundev *tun) {
+    int i, err;
+    uv_loop_t *loop = uv_default_loop();
+
+    if (tun->mode == TUN_MODE_SERVER) {
+        for (i = 0; i < HASHSIZE; i++) {
+            raddrs[i] = NULL;
+        }
+    }
+
+    if (tun->queues > 1) {
+        for (i = 0; i < tun->queues; i++) {
+            uv_thread_t thread_id;
+            struct tundev_context *ctx = &tun->contexts[i];
+            err = uv_sem_init(&ctx->semaphore, 0);
+            err = uv_thread_create(&thread_id, queue_start, ctx);
+        }
+
+        signal_install(loop, signal_cb, tun);
+
+        uv_run(loop, UV_RUN_DEFAULT);
+        loop_close(loop);
+
+        for (i = 0; i < tun->queues; i++) {
+            uv_sem_wait(&tun->contexts[i].semaphore);
+        }
+
+    } else {
+        struct tundev_context *ctx = tun->contexts;
+
+        uv_udp_init(loop, &ctx->inet);
+
+        if (tun->mode == TUN_MODE_SERVER) {
+            err = uv_udp_bind(&ctx->inet, &tun->bind_addr, UV_UDP_REUSEADDR);
+            if (err) {
+                logger_stderr("bind error: %s", uv_strerror(err));
+                return 1;
+            }
+        }
+
+        uv_udp_recv_start(&ctx->inet, inet_alloc_cb, inet_recv_cb);
 
 #ifdef ANDROID
-    uv_os_fd_t fd = 0;
-    int rc = uv_fileno((uv_handle_t*) &tun->inet, &fd);
-    if (rc) {
-        logger_log(LOG_ERR, "Get fileno error: %s", uv_strerror(rc));
-        return 1;
-    } else {
-        protectSocket(fd);
-    }
-    logger_log(LOG_INFO, "xTun started.");
+        uv_os_fd_t fd = 0;
+        err = uv_fileno((uv_handle_t*) &tun->inet, &fd);
+        if (err) {
+            logger_log(LOG_ERR, "Get fileno error: %s", uv_strerror(err));
+            return 1;
+        } else {
+            protectSocket(fd);
+        }
+        logger_log(LOG_INFO, "xTun started.");
 #endif
 
-    uv_poll_init(loop, &tun->watcher, tun->tunfd);
-    uv_poll_start(&tun->watcher, UV_READABLE, poll_cb);
+        uv_poll_init(loop, &ctx->watcher, ctx->tunfd);
+        uv_poll_start(&ctx->watcher, UV_READABLE, poll_cb);
 
-    uv_run(loop, UV_RUN_DEFAULT);
+        signal_install(loop, signal_cb, tun);
+
+        uv_run(loop, UV_RUN_DEFAULT);
+
+        loop_close(loop);
+    }
 
     return 0;
 }

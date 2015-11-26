@@ -232,3 +232,22 @@ add_route(const char *name, const char *address, int prefix) {
     close(inet4);
     return rc;
 }
+
+int
+create_socket(int type, int reuse) {
+    int sock;
+    sock = socket(AF_INET, type, IPPROTO_IP);
+    if (sock < 0) {
+        logger_stderr("socket error: %s", strerror(errno));
+        return -1;
+    }
+    if (reuse) {
+#ifdef SO_REUSEPORT
+        int yes = 1;
+        if (setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &yes, sizeof(yes))) {
+            logger_stderr("setsockopt SO_REUSEPORT error: %s", strerror(errno));
+        }
+#endif
+    }
+    return sock;
+}

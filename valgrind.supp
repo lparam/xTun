@@ -1,0 +1,38 @@
+{
+   <false_alarm>
+   Memcheck:Param
+   ioctl(generic)
+   fun:ioctl
+   fun:tun_stop
+   fun:uv__signal_event
+   fun:uv__io_poll
+   fun:uv_run
+   fun:tun_start
+   fun:main
+}
+{
+   <false_alarm>
+   Memcheck:Param
+   ioctl(generic)
+   fun:ioctl
+   fun:queue_close
+   fun:uv__async_event
+   fun:uv__async_io
+   fun:uv__io_poll
+   fun:uv_run
+   fun:queue_start
+   fun:uv__thread_start
+   fun:start_thread
+   fun:clone
+}
+{
+   <false_alarm_pthread>
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:calloc
+   fun:_dl_allocate_tls
+   fun:pthread_create@@GLIBC_2.2.5
+   fun:uv_thread_create
+   fun:tun_start
+   fun:main
+}

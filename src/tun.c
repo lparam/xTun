@@ -294,6 +294,7 @@ tun_alloc(char *iface) {
     struct ifreq ifr;
     memset(&ifr, 0, sizeof ifr);
     ifr.ifr_flags = IFF_TUN | IFF_NO_PI | IFF_MULTI_QUEUE;
+    strncpy(ifr.ifr_name, tun->iface, IFNAMSIZ);
 
     for (i = 0; i < queues; i++) {
         if ((fd = open("/dev/net/tun", O_RDWR | O_NONBLOCK)) < 0 ) {
@@ -344,9 +345,9 @@ tun_free(struct tundev *tun) {
 #ifndef ANDROID
 void
 tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode, struct sockaddr *addr) {
-    strcpy(tun->ifconf, ifconf);
     tun->mtu = mtu;
     tun->mode = mode;
+    strcpy(tun->ifconf, ifconf);
 
     if (mode == TUN_MODE_CLIENT) {
         tun->server_addr = *addr;
@@ -376,14 +377,16 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode, struct soc
 	memset(&ifr, 0, sizeof ifr);
     strncpy(ifr.ifr_name, tun->iface, IFNAMSIZ);
 
-	struct sockaddr_in *saddr= (struct sockaddr_in *) &ifr.ifr_addr;
+	struct sockaddr_in *saddr;
+
+    saddr = (struct sockaddr_in *)&ifr.ifr_addr;
     saddr->sin_family = AF_INET;
-    saddr->sin_addr.s_addr = inet_addr((const char *) ipaddr);
+    saddr->sin_addr.s_addr = inet_addr((const char *)ipaddr);
 	if(saddr->sin_addr.s_addr == INADDR_NONE) {
         logger_stderr("Invalid IP address: %s", ifconf);
 		exit(1);
 	}
-    if(ioctl(inet4, SIOCSIFADDR, (void *) &ifr) < 0) {
+    if(ioctl(inet4, SIOCSIFADDR, (void *)&ifr) < 0) {
         logger_stderr("ioctl(SIOCSIFADDR): %s", strerror(errno));
 		exit(1);
     }
@@ -391,21 +394,21 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode, struct soc
     saddr = (struct sockaddr_in *)&ifr.ifr_netmask;
     saddr->sin_family = AF_INET;
     saddr->sin_addr.s_addr = htonl(netmask);
-    if(ioctl(inet4, SIOCSIFNETMASK, (void *) &ifr) < 0) {
+    if(ioctl(inet4, SIOCSIFNETMASK, (void *)&ifr) < 0) {
         logger_stderr("ioctl(SIOCSIFNETMASK): %s", strerror(errno));
 		exit(1);
     }
 
     // Activate interface.
 	ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
-	if(ioctl(inet4, SIOCSIFFLAGS, (void *) &ifr) < 0) {
+	if(ioctl(inet4, SIOCSIFFLAGS, (void *)&ifr) < 0) {
         logger_stderr("ioctl(SIOCSIFFLAGS): %s", strerror(errno));
 		exit(1);
 	}
 
     // Set MTU if it is specified.
 	ifr.ifr_mtu = mtu;
-	if(ioctl(inet4, SIOCSIFMTU, (void *) &ifr) < 0) {
+	if(ioctl(inet4, SIOCSIFMTU, (void *)&ifr) < 0) {
         logger_stderr("ioctl(SIOCSIFMTU): %s", strerror(errno));
 		exit(1);
 	}

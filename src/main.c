@@ -14,6 +14,7 @@
 static int mtu = MTU;
 static int daemon_mode = 1;
 static int mode;
+static uint32_t queues = 1;
 static char *iface;
 static char *ifconf;
 static char *server_addrbuf;
@@ -24,7 +25,7 @@ static char *xsignal;
 
 int signal_process(char *signal, const char *pidfile);
 
-static const char *_optString = "i:I:m:k:s:l:p:nVvh";
+static const char *_optString = "i:I:m:k:s:l:p:q:nVvh";
 static const struct option _lopts[] = {
     { "",        required_argument,   NULL, 'i' },
     { "",        required_argument,   NULL, 'I' },
@@ -33,6 +34,7 @@ static const struct option _lopts[] = {
     { "",        required_argument,   NULL, 's' },
     { "",        required_argument,   NULL, 'l' },
     { "",        required_argument,   NULL, 'p' },
+    { "",        required_argument,   NULL, 'q' },
     { "mtu",     required_argument,   NULL,  0  },
     { "signal",  required_argument,   NULL,  0  },
     { "version", no_argument,         NULL, 'v' },
@@ -55,6 +57,7 @@ print_usage(const char *prog) {
          "  -s <server address>\t server address:port (only available in client mode)\n"
          "  [-l <bind address>]\t bind address:port (only available in server mode, default: 0.0.0.0:1082)\n"
          "  [-p <pid_file>]\t PID file of daemon (default: /var/run/xTun.pid)\n"
+         "  [-q <queues>]\t\t multiqueue tun (default: 1)\n"
          "  [--mtu <mtu>]\t\t MTU size (default: 1440)\n"
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
          "  [-n]\t\t\t non daemon mode\n"
@@ -96,6 +99,12 @@ parse_opts(int argc, char *argv[]) {
             break;
         case 'p':
             pidfile = optarg;
+            break;
+        case 'q':
+            queues = strtoul(optarg, NULL, 10);
+            if(queues == 0 ||  queues > 256) {
+                queues = 1;
+            }
             break;
         case 'n':
             daemon_mode = 0;
@@ -202,7 +211,7 @@ main(int argc, char *argv[]) {
         }
     }
 
-	struct tundev *tun = tun_alloc(iface);
+	struct tundev *tun = tun_alloc(iface, queues);
     if (!tun) {
         return 1;
     }

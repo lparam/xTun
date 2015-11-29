@@ -24,7 +24,7 @@ enum tun_mode {
 };
 
 #ifndef ANDROID
-struct tundev * tun_alloc(char *iface);
+struct tundev * tun_alloc(char *iface, uint32_t queues);
 void tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode, struct sockaddr *addr);
 #else
 struct tundev * tun_alloc(void);

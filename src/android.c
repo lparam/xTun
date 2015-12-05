@@ -15,29 +15,34 @@
 #include "android.h"
 
 
-struct dns_query {
-    int tunfd;
-    struct iphdr iphdr;
-    struct udphdr udphdr;
-    uv_udp_t handle;
-    uv_timer_t *timer;
-};
-
-struct query_cache {
-	struct dns_query *query;
-	struct query_cache *next;
-};
-
 #define DNS_ANSWER_SIZE 1024
 #define TIMEOUT 60
 #define HASHSIZE 256
 
+
+struct dns_query {
+    int             tunfd;
+    struct iphdr    iphdr;
+    struct udphdr   udphdr;
+    uv_udp_t        handle;
+    uv_timer_t     *timer;
+};
+
+struct query_cache {
+	struct dns_query    *query;
+	struct query_cache  *next;
+};
+
 static struct query_cache *caches[HASHSIZE];
 
-static void dns_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf);
-static void dns_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf, const struct sockaddr *addr, unsigned flags);
+static void dns_alloc_cb(uv_handle_t *handle, size_t suggested_size,
+                         uv_buf_t *buf);
+static void dns_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
+                        const struct sockaddr *addr, unsigned flags);
 static void close_query(struct dns_query *query);
-static void handle_local_dns_answer(struct dns_query *query, uint8_t *buf, size_t len);
+static void handle_local_dns_answer(struct dns_query *query, uint8_t *buf,
+                                    size_t len);
+void network_to_tun(int tunfd, uint8_t *buf, ssize_t len);
 
 
 static uint16_t
@@ -51,10 +56,12 @@ static struct query_cache *
 cache_lookup(uint16_t port) {
 	int h = hash_query(port);
 	struct query_cache *cache = caches[h];
-	if (cache == NULL)
+	if (cache == NULL) {
 		return NULL;
-	if (cache->query->udphdr.source == port)
+    }
+	if (cache->query->udphdr.source == port) {
 		return cache;
+    }
 	struct query_cache *last = cache;
 	while (last->next) {
 		cache = last->next;
@@ -70,8 +77,9 @@ static void
 cache_remove(uint16_t port) {
 	int h = hash_query(port);
 	struct query_cache *cache = caches[h];
-	if (cache == NULL)
+	if (cache == NULL) {
 		return;
+    }
 	if (cache->query->udphdr.source == port) {
 		caches[h] = cache->next;
 		return;
@@ -130,9 +138,9 @@ new_query(int tunfd, struct iphdr *iphdr, struct udphdr *udphdr) {
         free(query->timer);
         free(query);
         return NULL;
-    } else {
-        protectSocket(fd);
     }
+
+    protectSocket(fd);
 
     return query;
 }
@@ -174,33 +182,40 @@ dns_send_cb(uv_udp_send_t *req, int status) {
         logger_log(LOG_ERR, "DNS query failed: %s", uv_strerror(status));
     }
     uv_buf_t *buf = (uv_buf_t *)(req + 1);
-    free(buf->base - sizeof(struct iphdr) - sizeof(struct udphdr) - PRIMITIVE_BYTES);
+    size_t offset = sizeof(struct iphdr) - sizeof(struct udphdr)
+                   - PRIMITIVE_BYTES;
+    free(buf->base - offset);
     free(req);
 }
 
 static void
-dns_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf, const struct sockaddr *addr, unsigned flags) {
+dns_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
+            const struct sockaddr *addr, unsigned flags) {
     if (nread > 0) {
-        struct dns_query *query = container_of(handle, struct dns_query, handle);
+        struct dns_query *query =
+            container_of(handle, struct dns_query, handle);
         reset_timer(query);
-        handle_local_dns_answer(query, (uint8_t*)buf->base, nread);
+        handle_local_dns_answer(query, (uint8_t *) buf->base, nread);
     }
     free(buf->base);
 }
 
 static void
-cache_log(struct iphdr *iphdr, struct udphdr *udphdr, struct sockaddr *server, const char *hint) {
+cache_log(struct iphdr *iphdr, struct udphdr *udphdr, struct sockaddr *server,
+          const char *hint) {
     char saddr[24] = {0}, daddr[30] = {0};
     char *addr = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
     strcpy(saddr, addr);
     uv_ip4_name((const struct sockaddr_in *) server, daddr, sizeof(daddr));
-    logger_log(LOG_WARNING, "DNS Cache %s: %s:%d -> %s", hint, saddr, ntohs(udphdr->source), daddr);
+    logger_log(LOG_WARNING, "DNS Cache %s: %s:%d -> %s", hint, saddr,
+               ntohs(udphdr->source), daddr);
 }
 
 int
-handle_local_dns_query(int tunfd, struct sockaddr *dns_server, uint8_t *buf, int buflen) {
-    struct iphdr *iphdr = (struct iphdr *)buf;
-    struct udphdr *udphdr = (struct udphdr *)(buf + sizeof(struct iphdr));
+handle_local_dns_query(int tunfd, struct sockaddr *dns_server,
+                       uint8_t *buf, int buflen) {
+    struct iphdr *iphdr = (struct iphdr *) buf;
+    struct udphdr *udphdr = (struct udphdr *) (buf + sizeof(struct iphdr));
 
     buf += sizeof(struct iphdr) + sizeof(struct udphdr);
     buflen -= sizeof(struct iphdr) + sizeof(struct udphdr);
@@ -232,7 +247,7 @@ handle_local_dns_query(int tunfd, struct sockaddr *dns_server, uint8_t *buf, int
 
     uv_udp_send_t *write_req = malloc(sizeof(*write_req) + sizeof(uv_buf_t));
     uv_buf_t *outbuf = (uv_buf_t *)(write_req + 1);
-    outbuf->base = (char *)buf;
+    outbuf->base = (char *) buf;
     outbuf->len = buflen;
     uv_udp_send(write_req, &query->handle, outbuf, 1, dns_server, dns_send_cb);
 
@@ -240,9 +255,11 @@ handle_local_dns_query(int tunfd, struct sockaddr *dns_server, uint8_t *buf, int
 }
 
 static void
-create_dns_packet(struct dns_query *query, uint8_t *answer, ssize_t answer_len, uint8_t *packet) {
+create_dns_packet(struct dns_query *query, uint8_t *answer, ssize_t answer_len,
+                  uint8_t *packet) {
     struct iphdr iphdr;
     struct udphdr udphdr;
+
     memset(&iphdr, 0, sizeof(iphdr));
     memset(&udphdr, 0, sizeof(udphdr));
 
@@ -257,7 +274,8 @@ create_dns_packet(struct dns_query *query, uint8_t *answer, ssize_t answer_len, 
     iphdr.ttl = query->iphdr.ttl;
     iphdr.tos = query->iphdr.tos;
 
-    iphdr.tot_len = htons(sizeof(struct iphdr) + sizeof(struct udphdr) + answer_len);
+    iphdr.tot_len = htons(sizeof(struct iphdr) + sizeof(struct udphdr)
+                          + answer_len);
     iphdr.check = checksum((uint16_t*)&iphdr, sizeof(struct iphdr));
 
     udphdr.dest = query->udphdr.source;
@@ -271,24 +289,10 @@ create_dns_packet(struct dns_query *query, uint8_t *answer, ssize_t answer_len, 
 }
 
 static void
-handle_local_dns_answer(struct dns_query *query, uint8_t *answer, size_t answer_len) {
-    int packet_len = sizeof(struct iphdr) + sizeof(struct udphdr) + answer_len;
-    uint8_t packet[packet_len];
-
-    create_dns_packet(query, answer, answer_len, packet);
-
-    for (;;) {
-        int rc = write(query->tunfd, packet, packet_len);
-        if (rc < 0) {
-            if (errno == EINTR) {
-                continue;
-            } else {
-                logger_log(LOG_ERR, "Write tun: %s", strerror(errno));
-                exit(1);
-            }
-
-        } else {
-            break;
-        }
-    }
+handle_local_dns_answer(struct dns_query *query, uint8_t *answer,
+                        size_t answer_len) {
+    int pktsz = sizeof(struct iphdr) + sizeof(struct udphdr) + answer_len;
+    uint8_t pkt[pktsz];
+    create_dns_packet(query, answer, answer_len, pkt);
+    network_to_tun(query->tunfd, pkt, pktsz);
 }

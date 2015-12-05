@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <netinet/in.h>
 
-#define xTun_VERSION      "0.3.0"
+#define xTun_VERSION      "0.4.0"
 #define xTun_VER          "xTun/" xTun_VERSION
 
 /* MTU of VPN tunnel device. Use the following formula to calculate:

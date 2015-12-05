@@ -59,7 +59,7 @@ print_usage(const char *prog) {
          "  -s <server address>\t server address:port (only available in client mode)\n"
          "  [-l <bind address>]\t bind address:port (only available in server mode, default: 0.0.0.0:1082)\n"
          "  [-p <pid_file>]\t PID file of daemon (default: /var/run/xTun.pid)\n"
-         "  [-P <parallel>]\t\t number of parallel instance to run\n"
+         "  [-P <parallel>]\t number of parallel instance to run\n"
          "  [--mtu <mtu>]\t\t MTU size (default: 1440)\n"
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
          "  [-n]\t\t\t non daemon mode\n"

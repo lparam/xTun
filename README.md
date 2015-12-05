@@ -7,6 +7,8 @@ Features
 * Stateless
 * CCA security
 * Low cost (CPU, RAM and packet overhead)
+* Cross-platform, including PC (Linux, Mobile ([Android](https://github.com/lparam/xTun-android)) and Router (OpenWRT)
+* Parallelization
 
 
 BUILD
@@ -32,7 +34,7 @@ Usage
 ### Server
 
 ```bash
-xTun -i IFACE -I IP/MASK -c server -k PASSWORD
+xTun -i IFACE -I IP/MASK -m server -k PASSWORD -P PARALLEL
 scripts/server_up.sh
 ```
 
@@ -45,7 +47,7 @@ scripts/server_down.sh
 ### Client
 
 ```bash
-xTun -i IFACE -I IP/MASK -c client -k PASSWORD -s SERVER
+xTun -i IFACE -I IP/MASK -m client -k PASSWORD -s SERVER
 scripts/client_up.sh
 ```
 

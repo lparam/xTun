@@ -3,6 +3,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <signal.h>
+#include <sys/socket.h>
 
 #include "util.h"
 #include "logger.h"
@@ -14,7 +16,7 @@
 static int mtu = MTU;
 static int daemon_mode = 1;
 static int mode;
-static uint32_t queues = 1;
+static uint32_t parallel = 1;
 static char *iface;
 static char *ifconf;
 static char *server_addrbuf;
@@ -25,7 +27,7 @@ static char *xsignal;
 
 int signal_process(char *signal, const char *pidfile);
 
-static const char *_optString = "i:I:m:k:s:l:p:q:nVvh";
+static const char *_optString = "i:I:m:k:s:l:p:P:nVvh";
 static const struct option _lopts[] = {
     { "",        required_argument,   NULL, 'i' },
     { "",        required_argument,   NULL, 'I' },
@@ -34,7 +36,7 @@ static const struct option _lopts[] = {
     { "",        required_argument,   NULL, 's' },
     { "",        required_argument,   NULL, 'l' },
     { "",        required_argument,   NULL, 'p' },
-    { "",        required_argument,   NULL, 'q' },
+    { "",        required_argument,   NULL, 'P' },
     { "mtu",     required_argument,   NULL,  0  },
     { "signal",  required_argument,   NULL,  0  },
     { "version", no_argument,         NULL, 'v' },
@@ -57,7 +59,7 @@ print_usage(const char *prog) {
          "  -s <server address>\t server address:port (only available in client mode)\n"
          "  [-l <bind address>]\t bind address:port (only available in server mode, default: 0.0.0.0:1082)\n"
          "  [-p <pid_file>]\t PID file of daemon (default: /var/run/xTun.pid)\n"
-         "  [-q <queues>]\t\t multiqueue tun (default: 1)\n"
+         "  [-P <parallel>]\t\t number of parallel instance to run\n"
          "  [--mtu <mtu>]\t\t MTU size (default: 1440)\n"
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
          "  [-n]\t\t\t non daemon mode\n"
@@ -100,10 +102,10 @@ parse_opts(int argc, char *argv[]) {
         case 'p':
             pidfile = optarg;
             break;
-        case 'q':
-            queues = strtoul(optarg, NULL, 10);
-            if(queues == 0 ||  queues > 256) {
-                queues = 1;
+        case 'P':
+            parallel = strtoul(optarg, NULL, 10);
+            if(parallel == 0 ||  parallel > 256) {
+                parallel = 1;
             }
             break;
         case 'n':
@@ -203,6 +205,7 @@ main(int argc, char *argv[]) {
             logger_stderr("invalid server address");
             return 1;
         }
+
     } else {
         rc = resolve_addr(bind_addrbuf, &addr);
         if (rc) {
@@ -211,7 +214,7 @@ main(int argc, char *argv[]) {
         }
     }
 
-	struct tundev *tun = tun_alloc(iface, queues);
+	struct tundev *tun = tun_alloc(iface, parallel);
     if (!tun) {
         return 1;
     }

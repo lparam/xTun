@@ -5,9 +5,9 @@
 #include <stdint.h>
 #include <time.h>
 
-#include "uv.h"
 
 #define container_of(ptr, type, member) ((type*)(((char*)(ptr)) - offsetof(type, member)))
+
 
 void dump_hex(const void *data, uint32_t len, char *title);
 int resolve_addr(const char *buf, struct sockaddr *addr);

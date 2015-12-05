@@ -1,3 +1,8 @@
+v0.4.0 (2015-12-05)
+-----------
+* Feature: Multiqueue support
+
+
 v0.3.0 (2015-11-18)
 -----------
 * Feature: Android support

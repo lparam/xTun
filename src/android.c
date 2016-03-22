@@ -183,7 +183,7 @@ dns_send_cb(uv_udp_send_t *req, int status) {
     }
     uv_buf_t *buf = (uv_buf_t *)(req + 1);
     size_t offset = sizeof(struct iphdr) - sizeof(struct udphdr)
-                   - PRIMITIVE_BYTES;
+                    - PRIMITIVE_BYTES;
     free(buf->base - offset);
     free(req);
 }
@@ -220,9 +220,9 @@ handle_local_dns_query(int tunfd, struct sockaddr *dns_server,
     buf += sizeof(struct iphdr) + sizeof(struct udphdr);
     buflen -= sizeof(struct iphdr) + sizeof(struct udphdr);
 
-    int rc = filter_query(buf, buflen);
+    int domain_white = filter_query(buf, buflen);
 
-    if (!rc) {
+    if (!domain_white) {
         return 0;
     }
 
@@ -233,6 +233,9 @@ handle_local_dns_query(int tunfd, struct sockaddr *dns_server,
         if (query) {
             cache_insert(udphdr->source, query);
         } else {
+            size_t offset = sizeof(struct iphdr) - sizeof(struct udphdr)
+                            - PRIMITIVE_BYTES;
+            free(buf - offset);
             return 0;
         }
 

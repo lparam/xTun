@@ -1,7 +1,7 @@
 #!/bin/sh
 
 IFACE=tun0
-NET=10.0.0.1/16
+NET=10.0.0.1/24
 CHAIN=xTun
 
 # Turn on IP forwarding

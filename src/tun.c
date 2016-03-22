@@ -171,17 +171,17 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
             strcpy(saddr, a);
             a = inet_ntoa(*(struct in_addr *) &iphdr->daddr);
             strcpy(daddr, a);
-            logger_log(LOG_INFO, "Received %ld bytes from %s to %s",
+            logger_log(LOG_DEBUG, "Received %ld bytes from %s to %s",
                        mlen, saddr, daddr);
         }
 
-        struct tundev_context *ctx =
-              container_of(handle, struct tundev_context, inet);
+        struct tundev_context *ctx = container_of(handle,
+                                                  struct tundev_context, inet);
         struct tundev *tun = ctx->tun;
+        struct iphdr *iphdr = (struct iphdr *) m;
 
         if (tun->mode == TUN_MODE_SERVER) {
             // TODO: Compare source address
-            struct iphdr *iphdr = (struct iphdr *) m;
             uv_rwlock_rdlock(&rwlock);
             struct raddr *ra = lookup_addr(iphdr->saddr, tun->raddrs);
             uv_rwlock_rdunlock(&rwlock);
@@ -201,6 +201,17 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
                     ra->remote_addr = *addr;
                 }
             }
+
+        } else {
+#ifdef ANDROID
+            /* uint16_t frag = iphdr->frag_off & htons(0x1fff);
+            if ((iphdr->protocol == IPPROTO_UDP) && (frag == 0)) {
+                struct udphdr *udph =
+                  (struct udphdr *) (m + sizeof(struct iphdr));
+                if (ntohs(udph->source) == 53) {
+                }
+            } */
+#endif
         }
 
         network_to_tun(ctx->tunfd, m, mlen);
@@ -266,6 +277,7 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
                 strcpy(daddr, a);
                 logger_log(LOG_ERR, "Destination address miss: %s -> %s",
                            saddr, daddr);
+                free(tunbuf);
                 return;
             }
             addr = &ra->remote_addr;
@@ -296,7 +308,7 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
             strcpy(saddr, addr);
             addr = inet_ntoa(*(struct in_addr *) &iphdr->daddr);
             strcpy(daddr, addr);
-            logger_log(LOG_INFO, "Sending %ld bytes from %s to %s",
+            logger_log(LOG_DEBUG, "Sending %ld bytes from %s to %s",
                        mlen, saddr, daddr);
         }
 

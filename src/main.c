@@ -5,6 +5,8 @@
 #include <getopt.h>
 #include <signal.h>
 #include <sys/socket.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
 
 #include "util.h"
 #include "logger.h"
@@ -13,9 +15,9 @@
 #include "tun.h"
 
 
+static int mode;
 static int mtu = MTU;
 static int daemon_mode = 1;
-static int mode;
 static uint32_t parallel = 1;
 static char *iface;
 static char *ifconf;
@@ -166,6 +168,7 @@ init() {
 
 int
 main(int argc, char *argv[]) {
+    printf("tcphdr: %ld udphdr: %ld\n", sizeof(struct tcphdr), sizeof(struct udphdr));
     parse_opts(argc, argv);
 
     if (xsignal) {

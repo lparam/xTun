@@ -18,45 +18,19 @@
 #include "logger.h"
 #include "crypto.h"
 #include "tun.h"
+#include "tun_imp.h"
 #ifdef ANDROID
 #include "android.h"
 #endif
 
 
+#define DNS_PORT 53
 #define HASHSIZE 256
-
 
 struct raddr {
     struct in_addr     tun_addr;
 	struct sockaddr    remote_addr;
 	struct raddr      *next;
-};
-
-struct tundev_context {
-	int              tunfd;
-    int              inet_fd;
-    uint8_t         *network_buffer;
-    uv_udp_t         inet;
-    uv_poll_t        watcher;
-    uv_sem_t         semaphore;
-    uv_async_t       async_handle;
-    struct tundev   *tun;
-};
-
-struct tundev {
-    char                    iface[128];
-    char                    ifconf[128];
-    int                     mode;
-    int                     mtu;
-    struct sockaddr         bind_addr;
-    struct sockaddr         server_addr;
-#ifdef ANDROID
-    int                     is_global_proxy;
-    struct sockaddr         dns_server;
-#endif
-    struct raddr           *raddrs[HASHSIZE];
-    uint32_t                queues;
-    struct tundev_context   contexts[0];
 };
 
 struct signal_ctx {
@@ -90,9 +64,8 @@ lookup_addr(uint32_t addr, struct raddr **raddrs) {
 	struct raddr *last = ra;
 	while (last->next) {
 		ra = last->next;
-        if (ra->tun_addr.s_addr == addr) {
+        if (ra->tun_addr.s_addr == addr)
 			return ra;
-		}
 		last = ra;
 	}
 	return NULL;
@@ -100,7 +73,8 @@ lookup_addr(uint32_t addr, struct raddr **raddrs) {
 
 static void
 save_addr(uint32_t tun_addr, const struct sockaddr *remote_addr,
-          struct raddr **raddrs) {
+          struct raddr **raddrs)
+{
 	int h = hash_addr(tun_addr);
 	struct raddr *ra = malloc(sizeof(struct raddr));
 	memset(ra, 0, sizeof(*ra));
@@ -125,14 +99,6 @@ clear_addrs(struct raddr **addrs) {
 }
 #endif
 
-static void
-inet_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
-    struct tundev_context *ctx =
-            container_of(handle, struct tundev_context, inet);
-    buf->base = (char *)ctx->network_buffer;
-    buf->len = ctx->tun->mtu + PRIMITIVE_BYTES;
-}
-
 void
 network_to_tun(int tunfd, uint8_t *buf, ssize_t len) {
     uint8_t *pos = buf;
@@ -148,98 +114,6 @@ network_to_tun(int tunfd, uint8_t *buf, ssize_t len) {
         }
         pos += sz;
         remaining -= sz;
-    }
-}
-
-static void
-inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
-             const struct sockaddr *addr, unsigned flags) {
-    if (nread > 0) {
-        uint8_t *m = (uint8_t *)buf->base;
-        ssize_t mlen = nread - PRIMITIVE_BYTES;
-
-        int rc = crypto_decrypt(m, (uint8_t *)buf->base, nread);
-        if (rc) {
-            logger_log(LOG_ERR, "Invalid packet");
-            return;
-        }
-
-        if (verbose) {
-            char saddr[24] = {0}, daddr[24] = {0};
-            struct iphdr *iphdr = (struct iphdr *) m;
-            char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
-            strcpy(saddr, a);
-            a = inet_ntoa(*(struct in_addr *) &iphdr->daddr);
-            strcpy(daddr, a);
-            logger_log(LOG_DEBUG, "Received %ld bytes from %s to %s",
-                       mlen, saddr, daddr);
-        }
-
-        struct tundev_context *ctx = container_of(handle,
-                                                  struct tundev_context, inet);
-        struct tundev *tun = ctx->tun;
-        struct iphdr *iphdr = (struct iphdr *) m;
-
-        if (tun->mode == TUN_MODE_SERVER) {
-            // TODO: Compare source address
-            uv_rwlock_rdlock(&rwlock);
-            struct raddr *ra = lookup_addr(iphdr->saddr, tun->raddrs);
-            uv_rwlock_rdunlock(&rwlock);
-            if (ra == NULL) {
-                char saddr[24] = {0}, daddr[24] = {0};
-                char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
-                strcpy(saddr, a);
-                a = inet_ntoa(*(struct in_addr *) &iphdr->daddr);
-                strcpy(daddr, a);
-                logger_log(LOG_WARNING, "Cache miss: %s -> %s", saddr, daddr);
-                uv_rwlock_wrlock(&rwlock);
-                save_addr(iphdr->saddr, addr, tun->raddrs);
-                uv_rwlock_wrunlock(&rwlock);
-
-            } else {
-                if (memcmp(&ra->remote_addr, addr, sizeof(*addr))) {
-                    ra->remote_addr = *addr;
-                }
-            }
-
-        } else {
-#ifdef ANDROID
-            /* uint16_t frag = iphdr->frag_off & htons(0x1fff);
-            if ((iphdr->protocol == IPPROTO_UDP) && (frag == 0)) {
-                struct udphdr *udph =
-                  (struct udphdr *) (m + sizeof(struct iphdr));
-                if (ntohs(udph->source) == 53) {
-                }
-            } */
-#endif
-        }
-
-        network_to_tun(ctx->tunfd, m, mlen);
-    }
-}
-
-static void
-inet_send_cb(uv_udp_send_t *req, int status) {
-    if (status) {
-        logger_log(LOG_ERR, "Tun to network failed: %s", uv_strerror(status));
-    }
-    uv_buf_t *buf = (uv_buf_t *) (req + 1);
-    free(buf->base);
-    free(req);
-}
-
-static void
-tun_to_network(struct tundev_context *ctx, uint8_t *buf, int len,
-               struct sockaddr *addr) {
-    uv_udp_send_t *write_req = malloc(sizeof(*write_req) + sizeof(uv_buf_t));
-    uv_buf_t *outbuf = (uv_buf_t *) (write_req + 1);
-    outbuf->base = (char *) buf;
-    outbuf->len = len;
-    if (write_req) {
-        write_req->data = ctx;
-        uv_udp_send(write_req, &ctx->inet, outbuf, 1, addr, inet_send_cb);
-    } else {
-        free(buf);
     }
 }
 
@@ -263,7 +137,7 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
             return;
         }
 
-        struct iphdr *iphdr = (struct iphdr *)m;
+        struct iphdr *iphdr = (struct iphdr *) m;
 
         if (tun->mode == TUN_MODE_SERVER) {
             uv_rwlock_rdlock(&rwlock);
@@ -287,11 +161,12 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
             if (!tun->is_global_proxy) {
                 uint16_t frag = iphdr->frag_off & htons(0x1fff);
                 if ((iphdr->protocol == IPPROTO_UDP) && (frag == 0)) {
-                    struct udphdr *udph =
-                          (struct udphdr *) (m + sizeof(struct iphdr));
-                    if (ntohs(udph->dest) == 53) {
+                    struct udphdr *udph = (struct udphdr *)
+                                          (m + sizeof(struct iphdr));
+                    if (ntohs(udph->dest) == DNS_PORT) {
                         int rc = handle_local_dns_query(ctx->tunfd,
-                                      &tun->dns_server, m, mlen);
+                                                        &tun->dns_server,
+                                                        m, mlen);
                         if (rc) {
                             return;
                         }
@@ -304,9 +179,9 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
 
         if (verbose) {
             char saddr[24] = {0}, daddr[24] = {0};
-            char *addr = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
+            char *addr = inet_ntoa(*((struct in_addr *) &iphdr->saddr));
             strcpy(saddr, addr);
-            addr = inet_ntoa(*(struct in_addr *) &iphdr->daddr);
+            addr = inet_ntoa(*((struct in_addr *) &iphdr->daddr));
             strcpy(daddr, addr);
             logger_log(LOG_DEBUG, "Sending %ld bytes from %s to %s",
                        mlen, saddr, daddr);
@@ -503,7 +378,7 @@ tun_config(struct tundev *tun, int fd, int mtu, int global, int v,
     }
 
     struct sockaddr_in _dns_server;
-    uv_ip4_addr(dns, 53, &_dns_server);
+    uv_ip4_addr(dns, DNS_PORT, &_dns_server);
     tun->dns_server = *((struct sockaddr *) &_dns_server);
 
     verbose = v;
@@ -559,8 +434,8 @@ tun_stop(struct tundev *tun) {
 
 static void
 queue_close(uv_async_t *handle) {
-    struct tundev_context *ctx =
-            container_of(handle, struct tundev_context, async_handle);
+    struct tundev_context *ctx = container_of(handle, struct tundev_context,
+                                              async_handle);
     uv_close((uv_handle_t *)&ctx->inet, NULL);
     uv_close((uv_handle_t *)&ctx->async_handle, NULL);
     uv_poll_stop(&ctx->watcher);
@@ -654,6 +529,23 @@ signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data) {
     }
 }
 
+static int
+udp_start(struct tundev *tun, uv_loop_t *loop) {
+    struct tundev_context *ctx = tun->contexts;
+
+    uv_udp_init(loop, &ctx->inet);
+
+    if (tun->mode == TUN_MODE_SERVER) {
+        int err = uv_udp_bind(&ctx->inet, &tun->bind_addr, UV_UDP_REUSEADDR);
+        if (err) {
+            logger_stderr("bind error: %s", uv_strerror(err));
+            return 1;
+        }
+    }
+
+    return uv_udp_recv_start(&ctx->inet, inet_alloc_cb, inet_recv_cb);
+}
+
 int
 tun_start(struct tundev *tun) {
     int i, err;
@@ -686,17 +578,11 @@ tun_start(struct tundev *tun) {
     } else {
         struct tundev_context *ctx = tun->contexts;
 
-        uv_udp_init(loop, &ctx->inet);
-
-        if (tun->mode == TUN_MODE_SERVER) {
-            err = uv_udp_bind(&ctx->inet, &tun->bind_addr, UV_UDP_REUSEADDR);
-            if (err) {
-                logger_stderr("bind error: %s", uv_strerror(err));
-                return 1;
-            }
+        if (tcp) {
+            tcp_start(tun, loop);
+        } else {
+            udp_start(tun, loop);
         }
-
-        uv_udp_recv_start(&ctx->inet, inet_alloc_cb, inet_recv_cb);
 
 #ifdef ANDROID
         uv_os_fd_t fd = 0;

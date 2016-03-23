@@ -11,9 +11,14 @@
    1492 (Ethernet) - 20 (IPv4, or 40 for IPv6) - 8 (UDP) - 24 (xTun) */
 #define MTU 1440
 
+/* MTU of VPN tunnel device. Use the following formula to calculate:
+   1492 (Ethernet) - 20 (IPv4, or 40 for IPv6) - 20 (TCP) - 26 (xTun) */
+#define MTU_TCP 1426
+
 #define PRIMITIVE_BYTES 24
 
 
+int tcp;
 int verbose;
 
 struct tundev;

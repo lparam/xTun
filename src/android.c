@@ -190,7 +190,8 @@ dns_send_cb(uv_udp_send_t *req, int status) {
 
 static void
 dns_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
-            const struct sockaddr *addr, unsigned flags) {
+            const struct sockaddr *addr, unsigned flags)
+{
     if (nread > 0) {
         struct dns_query *query =
             container_of(handle, struct dns_query, handle);
@@ -202,7 +203,8 @@ dns_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
 
 static void
 cache_log(struct iphdr *iphdr, struct udphdr *udphdr, struct sockaddr *server,
-          const char *hint) {
+          const char *hint)
+{
     char saddr[24] = {0}, daddr[30] = {0};
     char *addr = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
     strcpy(saddr, addr);
@@ -213,7 +215,8 @@ cache_log(struct iphdr *iphdr, struct udphdr *udphdr, struct sockaddr *server,
 
 int
 handle_local_dns_query(int tunfd, struct sockaddr *dns_server,
-                       uint8_t *buf, int buflen) {
+                       uint8_t *buf, int buflen)
+{
     struct iphdr *iphdr = (struct iphdr *) buf;
     struct udphdr *udphdr = (struct udphdr *) (buf + sizeof(struct iphdr));
 
@@ -259,7 +262,8 @@ handle_local_dns_query(int tunfd, struct sockaddr *dns_server,
 
 static void
 create_dns_packet(struct dns_query *query, uint8_t *answer, ssize_t answer_len,
-                  uint8_t *packet) {
+                  uint8_t *packet)
+{
     struct iphdr iphdr;
     struct udphdr udphdr;
 
@@ -293,7 +297,8 @@ create_dns_packet(struct dns_query *query, uint8_t *answer, ssize_t answer_len,
 
 static void
 handle_local_dns_answer(struct dns_query *query, uint8_t *answer,
-                        size_t answer_len) {
+                        size_t answer_len)
+{
     int pktsz = sizeof(struct iphdr) + sizeof(struct udphdr) + answer_len;
     uint8_t pkt[pktsz];
     create_dns_packet(query, answer, answer_len, pkt);

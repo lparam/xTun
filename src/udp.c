@@ -20,6 +20,71 @@
 #include "tun_imp.h"
 
 
+#define HASHSIZE 256
+
+struct raddr {
+	struct raddr    *next;
+    struct in_addr   tun_addr;
+	struct sockaddr  remote_addr;
+};
+
+static uv_rwlock_t rwlock;
+
+
+static uint32_t
+hash_addr(uint32_t addr) {
+	uint32_t a = addr >> 24;
+	uint32_t b = addr >> 12;
+	uint32_t c = addr;
+	return (a + b + c) % HASHSIZE;
+}
+
+static struct raddr *
+lookup_addr(uint32_t addr, struct raddr **raddrs) {
+	int h = hash_addr(addr);
+	struct raddr *ra = raddrs[h];
+	if (ra == NULL)
+		return NULL;
+	if (ra->tun_addr.s_addr == addr)
+		return ra;
+	struct raddr *last = ra;
+	while (last->next) {
+		ra = last->next;
+        if (ra->tun_addr.s_addr == addr)
+			return ra;
+		last = ra;
+	}
+	return NULL;
+}
+
+static void
+save_addr(uint32_t tun_addr, const struct sockaddr *remote_addr,
+          struct raddr **raddrs)
+{
+	int h = hash_addr(tun_addr);
+	struct raddr *ra = malloc(sizeof(struct raddr));
+	memset(ra, 0, sizeof(*ra));
+    ra->tun_addr.s_addr = tun_addr;
+    ra->remote_addr = *remote_addr;
+	ra->next = raddrs[h];
+	raddrs[h] = ra;
+}
+
+#ifndef ANDROID
+static void
+clear_addrs(struct raddr **addrs) {
+	for (int i = 0; i < HASHSIZE; i++) {
+        struct raddr *ra = addrs[i];
+        while (ra) {
+            void *tmp = ra;
+            ra = ra->next;
+            free(tmp);
+        }
+		addrs[i] = NULL;
+	}
+}
+#endif
+
 static void
 inet_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
     struct tundev_context *ctx =
@@ -56,6 +121,9 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
                                                   struct tundev_context, inet);
         struct tundev *tun = ctx->tun;
         struct iphdr *iphdr = (struct iphdr *) m;
+
+#ifdef XTUND
+#endif
 
         /* save client address */
         if (tun->mode == TUN_MODE_SERVER) {

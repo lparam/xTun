@@ -2,6 +2,7 @@
 #define TUN_IMP_H
 
 #include "uv.h"
+#include "packet.h"
 
 struct tundev_context {
 	int             tunfd;
@@ -10,9 +11,11 @@ struct tundev_context {
     uv_udp_t        inet;
     uv_tcp_t        inet_tcp;
     uv_write_t      write_req;
+    uv_connect_t    connect_req;
     uv_poll_t       watcher;
     uv_sem_t        semaphore;
     uv_async_t      async_handle;
+    struct packet  *packet;
     struct tundev  *tun;
 };
 

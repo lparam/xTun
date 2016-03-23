@@ -30,7 +30,7 @@ struct client_context {
         uv_udp_t udp;
     } handle;
     uv_timer_t *timer;
-    struct packet packet;
+    struct packet *packet;
     struct sockaddr addr;
 };
 
@@ -72,9 +72,8 @@ alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
 }
 
 static void
-tun_to_network_cb(uv_write_t *req, int status) {
+send_cb(uv_write_t *req, int status) {
     struct client_context *client = req->data;
-
     if (status) {
         char addrbuf[INET6_ADDRSTRLEN + 1] = {0};
         uint16_t port = ip_name(&client->addr, addrbuf, sizeof addrbuf);
@@ -83,25 +82,13 @@ tun_to_network_cb(uv_write_t *req, int status) {
     }
 }
 
-void
-tun_to_tcp(struct tundev_context *ctx, uint8_t *buf, int buflen) {
-    buf -= HEADER_BYTES;
-    write_size(buf, buflen);
-    buflen += HEADER_BYTES;
-    uv_buf_t data = uv_buf_init((char *)buf, buflen);
-    uv_write(&ctx->write_req, (uv_stream_t *) &ctx->inet_tcp, &data, 1,
-             tun_to_network_cb);
-}
-
 static void
 recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
-    struct client_context *client;
-
-    client = container_of(stream, struct client_context, handle);
-
+    struct client_context *client = container_of(stream, struct client_context,
+                                                 handle.stream);
     if (nread > 0) {
         /* reset_timer(client); */
-        struct packet *packet = &client->packet;
+        struct packet *packet = client->packet;
         int rc = packet_filter(packet, buf->base, nread);
         if (rc == PACKET_UNCOMPLETE) {
             return;
@@ -117,6 +104,8 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         if (err) {
             goto error;
         }
+
+        struct iphdr *iphdr = (struct iphdr *) m;
 
         struct tundev_context *ctx = stream->data;
         network_to_tun(ctx->tunfd, m, mlen);
@@ -139,21 +128,15 @@ error:
 }
 
 static void
-receive_from_client(struct client_context *client) {
-    packet_reset(&client->packet);
-    client->handle.stream.data = &client->packet;
-    uv_read_start(&client->handle.stream, alloc_cb, recv_cb);
-}
-
-static void
-receive_from_server(struct client_context *client) {
-    packet_reset(&client->packet);
-    client->handle.stream.data = &client->packet;
+receive_from_client(struct client_context *client, struct tundev_context *ctx) {
+    packet_reset(client->packet);
+    client->handle.stream.data = ctx;
     uv_read_start(&client->handle.stream, alloc_cb, recv_cb);
 }
 
 static void
 accept_cb(uv_stream_t *server, int status) {
+    struct tundev_context *ctx = server->data;
     struct client_context *client = new_client();
 
     uv_timer_init(server->loop, client->timer);
@@ -164,57 +147,32 @@ accept_cb(uv_stream_t *server, int status) {
         int namelen = sizeof client->addr;
         uv_tcp_getpeername(&client->handle.tcp, &client->addr, &namelen);
         /* reset_timer(client); */
-        receive_from_client(client);
+        receive_from_client(client, ctx);
     } else {
         logger_log(LOG_ERR, "accept error: %s", uv_strerror(rc));
         close_client(client);
     }
 }
 
-static void
-connect_cb(uv_connect_t *req, int status) {
-    struct remote_context *remote = (struct remote_context *)req->data;
-    struct client_context *client = remote->client;
-
-    if (status == 0) {
-        receive_from_server(remote);
-
-    } else {
-        if (status != UV_ECANCELED) {
-            // TODO: handle RST
-            logger_log(LOG_ERR, "connect to %s failed: %s", client->target_addr, uv_strerror(status));
-            close_client(client);
-            close_remote(remote);
-        }
-    }
-}
-
-static void
-connect_to_server(struct remote_context *remote) {
-    remote->stage = XSTAGE_CONNECT;
-    remote->connect_req.data = remote;
-    int rc = uv_tcp_connect(&remote->connect_req, &remote->handle.tcp, &remote->addr, connect_cb);
-    if (rc) {
-        logger_log(LOG_ERR, "connect to %s error: %s", remote->client->target_addr, uv_strerror(rc));
-        close_client(remote->client);
-        close_remote(remote);
-    }
-}
-
-static int
+int
 tcp_start(struct tundev *tun, uv_loop_t *loop) {
-    int backlog, rc;
-    struct tundev_context *ctx;
-
-    backlog = 128;
-    ctx = tun->contexts;
-
+    struct tundev_context *ctx = tun->contexts;
     uv_tcp_init(loop, &ctx->inet_tcp);
-    rc = uv_tcp_bind(&ctx->inet_tcp, &tun->bind_addr, 0);
+    int rc = uv_tcp_bind(&ctx->inet_tcp, &tun->bind_addr, 0);
     if (rc) {
         logger_stderr("tcp bind error: %s", uv_strerror(rc));
         return 1;
     }
     ctx->inet_tcp.data = ctx;
-    return uv_listen((uv_stream_t *) &ctx->inet_tcp, backlog, accept_cb);
+    return uv_listen((uv_stream_t *) &ctx->inet_tcp, 128, accept_cb);
+}
+
+void
+tun_to_tcp(struct tundev_context *ctx, uint8_t *buf, int buflen) {
+    buf -= HEADER_BYTES;
+    write_size(buf, buflen);
+    buflen += HEADER_BYTES;
+    uv_buf_t data = uv_buf_init((char *)buf, buflen);
+    uv_write(&ctx->write_req, (uv_stream_t *) &ctx->inet_tcp, &data, 1,
+             send_cb);
 }

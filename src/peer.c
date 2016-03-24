@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "client.h"
+#include "peer.h"
 
 #define HASHSIZE 256
 
@@ -33,8 +33,7 @@ lookup_peer(uint32_t addr, struct peer **peers) {
 }
 
 struct peer *
-save_peer(uint32_t tun_addr, const struct sockaddr *remote_addr,
-          struct peer **peers)
+save_peer(uint32_t tun_addr, struct sockaddr *remote_addr, struct peer **peers)
 {
 	int h = hash_peer(tun_addr);
 	struct peer *p = malloc(sizeof(struct peer));
@@ -57,4 +56,8 @@ clear_peers(struct peer **peers) {
         }
 		peers[i] = NULL;
 	}
+}
+
+void
+peer_init() {
 }

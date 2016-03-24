@@ -15,31 +15,36 @@
 #include "tun.h"
 
 
-static int mode;
 static int mtu = MTU;
 static int daemon_mode = 1;
 static uint32_t parallel = 1;
 static char *iface;
 static char *ifconf;
-static char *server_addrbuf;
-static char *bind_addrbuf = "0.0.0.0:1082";
+#ifdef XTUND
+static char *addrbuf = "0.0.0.0:1082";
+static char *pidfile = "/var/run/xTund.pid";
+#else
+static char *addrbuf;
 static char *pidfile = "/var/run/xTun.pid";
+#endif
 static char *password = NULL;
 static char *xsignal;
 
 int signal_process(char *signal, const char *pidfile);
 
-static const char *_optString = "i:I:m:k:s:l:p:P:nVvh";
+static const char *_optString = "i:I:k:s:l:p:P:nVvh";
 static const struct option _lopts[] = {
     { "",        required_argument,   NULL, 'i' },
     { "",        required_argument,   NULL, 'I' },
-    { "",        required_argument,   NULL, 'm' },
     { "",        required_argument,   NULL, 'k' },
     { "",        required_argument,   NULL, 's' },
-    { "",        required_argument,   NULL, 'l' },
+    { "",        required_argument,   NULL, 'b' },
     { "",        required_argument,   NULL, 'p' },
     { "",        required_argument,   NULL, 'P' },
     { "mtu",     required_argument,   NULL,  0  },
+#ifndef XTUND
+    { "tcp",     required_argument,   NULL,  0  },
+#endif
     { "signal",  required_argument,   NULL,  0  },
     { "version", no_argument,         NULL, 'v' },
     { "",        no_argument,         NULL, 'n' },
@@ -56,13 +61,15 @@ print_usage(const char *prog) {
     printf("Options:\n");
     puts("  -i <iface>\t\t interface name (e.g. tun0)\n"
          "  -I <ifconf>\t\t IP address of interface (e.g. 10.3.0.1/16)\n"
-         "  -m <mode>\t\t client, server\n"
          "  -k <encryption_key>\t shared password for data encryption\n"
          "  -s <server address>\t server address:port (only available in client mode)\n"
-         "  [-l <bind address>]\t bind address:port (only available in server mode, default: 0.0.0.0:1082)\n"
+         "  [-b <bind address>]\t bind address:port (only available in server mode, default: 0.0.0.0:1082)\n"
          "  [-p <pid_file>]\t PID file of daemon (default: /var/run/xTun.pid)\n"
          "  [-P <parallel>]\t number of parallel instance to run\n"
          "  [--mtu <mtu>]\t\t MTU size (default: 1440)\n"
+#ifndef XTUND
+         "  [--tcp]\t\t tcp mode\n"
+#endif
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
          "  [-n]\t\t\t non daemon mode\n"
          "  [-h, --help]\t\t this help\n"
@@ -84,22 +91,14 @@ parse_opts(int argc, char *argv[]) {
         case 'I':
             ifconf = optarg;
             break;
-        case 'm':
-            if (strcasecmp("client", optarg) == 0) {
-                mode = TUN_MODE_CLIENT;
-            }
-            if (strcasecmp("server", optarg) == 0) {
-                mode = TUN_MODE_SERVER;
-            }
-            break;
         case 'k':
             password = optarg;
             break;
         case 's':
-            server_addrbuf = optarg;
+            addrbuf = optarg;
             break;
-        case 'l':
-            bind_addrbuf = optarg;
+        case 'b':
+            addrbuf = optarg;
             break;
         case 'p':
             pidfile = optarg;
@@ -140,6 +139,12 @@ parse_opts(int argc, char *argv[]) {
                     mtu = MTU;
                 }
             }
+#ifndef XTUND
+            if (strcmp("tcp", _lopts[longindex].name) == 0) {
+                extern int tcp;
+                tcp = 1;
+            }
+#endif
 			break;
         default:
             print_usage(argv[0]);
@@ -168,24 +173,23 @@ init() {
 
 int
 main(int argc, char *argv[]) {
-    printf("tcphdr: %ld udphdr: %ld\n", sizeof(struct tcphdr), sizeof(struct udphdr));
     parse_opts(argc, argv);
 
     if (xsignal) {
         return signal_process(xsignal, pidfile);
     }
 
-    if (!mode || !iface || !ifconf || !password) {
+    if (!iface || !ifconf || !password) {
         print_usage(argv[0]);
         return 1;
     }
 
-    if (mode == TUN_MODE_CLIENT) {
-        if (!server_addrbuf) {
-            print_usage(argv[0]);
-            return 1;
-        }
+#ifndef XTUND
+    if (!addrbuf) {
+        print_usage(argv[0]);
+        return 1;
     }
+#endif
 
     if (daemon_mode) {
         if (daemonize()) {
@@ -201,20 +205,10 @@ main(int argc, char *argv[]) {
 
     struct sockaddr addr;
 
-    int rc;
-    if (mode == TUN_MODE_CLIENT) {
-        rc = resolve_addr(server_addrbuf, &addr);
-        if (rc) {
-            logger_stderr("invalid server address");
-            return 1;
-        }
-
-    } else {
-        rc = resolve_addr(bind_addrbuf, &addr);
-        if (rc) {
-            logger_stderr("invalid bind address");
-            return 1;
-        }
+    int rc = resolve_addr(addrbuf, &addr);
+    if (rc) {
+        logger_stderr("invalid address");
+        return 1;
     }
 
 	struct tundev *tun = tun_alloc(iface, parallel);
@@ -222,7 +216,7 @@ main(int argc, char *argv[]) {
         return 1;
     }
 
-    tun_config(tun, ifconf, mtu, mode, &addr);
+    tun_config(tun, ifconf, mtu, &addr);
     tun_start(tun);
 
     tun_free(tun);

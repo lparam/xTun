@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <time.h>
+#include <netinet/ip.h>
 
 
 #define container_of(ptr, type, member) ((type*)(((char*)(ptr)) - offsetof(type, member)))
@@ -17,5 +18,6 @@ int create_socket(int type, int reuse);
 pid_t gettid();
 int read_size(uint8_t *buffer);
 void write_size(uint8_t *buffer, int len);
+void parse_addr(struct iphdr *iphdr, char *saddr, char *daddr);
 
 #endif // for #ifndef UTIL_H

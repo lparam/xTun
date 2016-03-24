@@ -18,9 +18,10 @@
 #include "logger.h"
 #include "packet.h"
 #include "util.h"
-#include "client.h"
+#include "peer.h"
 #include "tun.h"
 #include "tun_imp.h"
+#include "xTund.h"
 
 
 struct client_context {
@@ -29,20 +30,22 @@ struct client_context {
         uv_handle_t handle;
         uv_stream_t stream;
     } handle;
-    struct packet *packet;
-    /* struct peer *peer; */
+    struct packet packet;
+    struct peer *peer;
 };
 
 
-struct client_context *
-new_client() {
+static struct client_context *
+new_client(int packet_size) {
     struct client_context *client = malloc(sizeof(*client));
     memset(client, 0, sizeof(*client));
+    client->packet.buf = malloc(packet_size);
     return client;
 }
 
 static void
 free_client(struct client_context *client) {
+    free(client->packet.buf);
     free(client);
 }
 
@@ -52,7 +55,7 @@ client_close_cb(uv_handle_t *handle) {
     free_client(client);
 }
 
-void
+static void
 close_client(struct client_context *client) {
     client->handle.handle.data = client;
     uv_close(&client->handle.handle, client_close_cb);
@@ -61,8 +64,8 @@ close_client(struct client_context *client) {
 static void
 alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
     struct client_context *client = container_of(handle, struct client_context,
-                                                 handle.handle);
-    struct packet *packet = client->packet;
+                                                 handle);
+    struct packet *packet = &client->packet;
     if (packet->size) {
         buf->base = (char *) packet->buf + packet->offset;
         buf->len = packet->size - packet->offset;
@@ -76,20 +79,18 @@ static void
 send_cb(uv_write_t *req, int status) {
     struct client_context *client = req->data;
     if (status) {
-        char buf[INET6_ADDRSTRLEN + 1] = {0};
-        uint16_t port = ip_name(&client->remote_addr, addrbuf, sizeof(buf));
-        logger_log(LOG_ERR, "send to %s:%d failed: %s", buf, port,
-                   uv_strerror(status));
+        if (client->peer) {
+            char *a = inet_ntoa(client->peer->tun_addr);
+            logger_log(LOG_ERR, "Send to %s failed: %s", a,
+              uv_strerror(status));
+        } else {
+            logger_log(LOG_ERR, "Send to client failed: %s",
+              uv_strerror(status));
+        }
     }
+    uv_buf_t *buf = (uv_buf_t *) (req + 1);
+    free(buf->base);
     free(req);
-}
-
-static void
-parse_addr(struct iphdr *iphdr, char *saddr, char *daddr) {
-    char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
-    strcpy(saddr, a);
-    a = inet_ntoa(*(struct in_addr *) &iphdr->daddr);
-    strcpy(daddr, a);
 }
 
 static void
@@ -97,7 +98,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     struct client_context *client = container_of(stream, struct client_context,
                                                  handle.stream);
     if (nread > 0) {
-        struct packet *packet = client->packet;
+        struct packet *packet = &client->packet;
         int rc = packet_filter(packet, buf->base, nread);
         if (rc == PACKET_UNCOMPLETE) {
             return;
@@ -115,41 +116,50 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         }
 
         struct iphdr *iphdr = (struct iphdr *) m;
+        char saddr[24] = {0}, daddr[24] = {0};
 
         if (verbose) {
-            char saddr[24] = {0}, daddr[24] = {0};
             parse_addr(iphdr, saddr, daddr);
             logger_log(LOG_DEBUG, "Received %ld bytes from %s to %s",
                        mlen, saddr, daddr);
         }
 
-        /* TODO: save client info */
-        uv_rwlock_rdlock(&rwlock);
-        struct peer *peer = lookup_peer(iphdr->saddr, tun->peers);
-        uv_rwlock_rdunlock(&rwlock);
-        if (peer == NULL) {
-            char saddr[24] = {0}, daddr[24] = {0};
-            parse_addr(iphdr, saddr, daddr);
-            logger_log(LOG_WARNING, "Cache miss: %s -> %s", saddr, daddr);
-            uv_rwlock_wrlock(&rwlock);
-            peer = save_peer(iphdr->saddr, addr, tun->raddrs);
-            uv_rwlock_wrunlock(&rwlock);
+        if (client->peer == NULL) {
+            uv_rwlock_rdlock(&rwlock);
+            struct peer *peer = lookup_peer(iphdr->saddr, peers);
+            uv_rwlock_rdunlock(&rwlock);
+            if (peer == NULL) {
+                parse_addr(iphdr, saddr, daddr);
+                logger_log(LOG_WARNING, "Cache miss: %s -> %s", saddr, daddr);
 
-        } else {
-            if (memcmp(&peer->remote_addr, addr, sizeof(*addr))) {
-                peer->remote_addr = *addr;
+                struct sockaddr addr;
+                int len = sizeof(addr);
+                uv_tcp_getpeername(&client->handle.tcp, &addr, &len);
+
+                uv_rwlock_wrlock(&rwlock);
+                peer = save_peer(iphdr->saddr, &addr, peers);
+                uv_rwlock_wrunlock(&rwlock);
+
+                peer->tcp = 1;
+                peer->data = client;
             }
         }
 
         struct tundev_context *ctx = stream->data;
         network_to_tun(ctx->tunfd, m, mlen);
 
+        packet_reset(packet);
+
     } else if (nread < 0) {
         if (nread != UV_EOF) {
-            char buf[INET6_ADDRSTRLEN + 1] = {0};
-            uint16_t port = ip_name(&client->remote_addr, buf, sizeof(buf));
-            logger_log(LOG_ERR, "Receive from %s:%d failed: %s", buf, port,
-                       uv_strerror(nread));
+            if (client->peer) {
+                char *a = inet_ntoa(client->peer->tun_addr);
+                logger_log(LOG_ERR, "Receive from %s failed: %s", a,
+                           uv_strerror(nread));
+            } else {
+                logger_log(LOG_ERR, "Receive from client failed: %s",
+                           uv_strerror(nread));
+            }
         }
         close_client(client);
     }
@@ -162,23 +172,15 @@ error:
 }
 
 static void
-receive_from_client(struct client_context *client) {
-    packet_reset(client->packet);
-    uv_read_start(&client->handle.stream, alloc_cb, recv_cb);
-}
-
-static void
 accept_cb(uv_stream_t *stream, int status) {
     struct tundev_context *ctx = stream->data;
-    struct client_context *client = new_client();
+    struct client_context *client = new_client(ctx->tun->mtu);
 
     uv_tcp_init(stream->loop, &client->handle.tcp);
     int rc = uv_accept(stream, &client->handle.stream);
     if (rc == 0) {
-        int len = sizeof(client->remote_addr);
-        uv_tcp_getpeername(&client->handle.tcp, &client->remote_addr, &len);
         client->handle.stream.data = ctx;
-        receive_from_client(client);
+        uv_read_start(&client->handle.stream, alloc_cb, recv_cb);
     } else {
         logger_log(LOG_ERR, "accept error: %s", uv_strerror(rc));
         close_client(client);
@@ -186,11 +188,9 @@ accept_cb(uv_stream_t *stream, int status) {
 }
 
 int
-tcp_start(struct tundev *tun, uv_loop_t *loop) {
-    struct tundev_context *ctx = tun->contexts;
-
+tcp_start(struct tundev_context *ctx, uv_loop_t *loop) {
     uv_tcp_init(loop, &ctx->inet_tcp.tcp);
-    int rc = uv_tcp_bind(&ctx->inet_tcp.tcp, &tun->bind_addr, 0);
+    int rc = uv_tcp_bind(&ctx->inet_tcp.tcp, &ctx->tun->addr, 0);
     if (rc) {
         logger_stderr("tcp bind error: %s", uv_strerror(rc));
         return 1;
@@ -200,12 +200,24 @@ tcp_start(struct tundev *tun, uv_loop_t *loop) {
 }
 
 void
-tun_to_tcp(struct tundev_context *ctx, uint8_t *buf, int buflen) {
-    buf -= HEADER_BYTES;
-    write_size(buf, buflen);
-    buflen += HEADER_BYTES;
-    uv_buf_t data = uv_buf_init((char *) buf, buflen);
-    uv_write_t *write_req = malloc(sizeof *write_req);
-    write_req->data = ctx;
-    uv_write(write_req, &ctx->inet_tcp.stream, &data, 1, send_cb);
+tun_to_tcp_client(struct peer *peer, uint8_t *buf, int len) {
+    struct client_context *client = peer->data;
+    if (client) {
+        uv_write_t *req = malloc(sizeof(*req) + sizeof(uv_buf_t));
+
+        uv_buf_t *outbuf = (uv_buf_t *) (req + 1);
+        outbuf->base = (char *) buf;
+        outbuf->len = len;
+
+        uint8_t hdr[2];
+        write_size(hdr, len);
+
+        uv_buf_t bufs[2] = {
+            uv_buf_init((char *) hdr, 2),
+            *outbuf,
+        };
+
+        req->data = client;
+        uv_write(req, &client->handle.stream, bufs, 2, send_cb);
+    }
 }

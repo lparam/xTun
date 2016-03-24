@@ -12,8 +12,8 @@ struct peer {
 };
 
 struct peer * lookup_peer(uint32_t addr, struct peer **peers);
-struct peer *save_peer(uint32_t tun_addr, const struct sockaddr *remote_addr,
-                       struct peer **peers);
+struct peer * save_peer(uint32_t tun_addr, struct sockaddr *remote_addr,
+                        struct peer **peers);
 void clear_peers(struct peer **peers);
 
 #endif // for #ifndef CLIENT_H

@@ -9,33 +9,24 @@
 
 /* MTU of VPN tunnel device. Use the following formula to calculate:
    1492 (Ethernet) - 20 (IPv4, or 40 for IPv6) - 8 (UDP) - 24 (xTun) */
-#define MTU 1440
+// #define MTU 1440
 
 /* MTU of VPN tunnel device. Use the following formula to calculate:
    1492 (Ethernet) - 20 (IPv4, or 40 for IPv6) - 20 (TCP) - 26 (xTun) */
-#define MTU_TCP 1426
+#define MTU 1426
 
-#define PRIMITIVE_BYTES 24
-
-
-int tcp;
 int verbose;
 
 struct tundev;
 
-enum tun_mode {
-    TUN_MODE_CLIENT = 1,
-    TUN_MODE_SERVER = 2,
-};
-
-#ifndef ANDROID
-struct tundev * tun_alloc(char *iface, uint32_t queues);
-void tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode,
-                struct sockaddr *addr);
-#else
+#ifdef ANDROID
 struct tundev * tun_alloc(void);
-int tun_config(struct tundev *tun, int fd, int mtu, int globalProxy,
+int tun_config(struct tundev *tun, int fd, int mtu, int global,
                int verbose, const char *server, const char *dns);
+#else
+struct tundev * tun_alloc(char *iface, uint32_t queues);
+void tun_config(struct tundev *tun, const char *ifconf, int mtu,
+                struct sockaddr *addr);
 #endif
 void tun_free(struct tundev *tun);
 int tun_start(struct tundev *tun);

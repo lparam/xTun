@@ -46,5 +46,7 @@ packet_filter(struct packet *packet, const char *buf, ssize_t buflen) {
 
 void
 packet_reset(struct packet *packet) {
-    memset(packet, 0, sizeof(*packet));
+    packet->read = 0;
+    packet->offset = 0;
+    packet->size = 0;
 }

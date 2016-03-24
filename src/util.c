@@ -231,3 +231,11 @@ write_size(uint8_t *buffer, int len) {
 	buffer[0] = (len >> 8) & 0xff;
 	buffer[1] = len & 0xff;
 }
+
+void
+parse_addr(struct iphdr *iphdr, char *saddr, char *daddr) {
+    char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
+    strcpy(saddr, a);
+    a = inet_ntoa(*(struct in_addr *) &iphdr->daddr);
+    strcpy(daddr, a);
+}

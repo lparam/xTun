@@ -17,6 +17,7 @@
 #include "util.h"
 #include "logger.h"
 #include "crypto.h"
+#include "peer.h"
 #include "tun.h"
 #include "tun_imp.h"
 #ifdef ANDROID
@@ -56,78 +57,71 @@ network_to_tun(int tunfd, uint8_t *buf, ssize_t len) {
 
 static void
 poll_cb(uv_poll_t *watcher, int status, int events) {
-    if (events == UV_READABLE) {
-        struct sockaddr *addr;
-        struct tundev *tun;
-        struct tundev_context *ctx;
-        uint8_t *tunbuf, *m;
+    struct tundev *tun;
+    struct tundev_context *ctx;
+    uint8_t *tunbuf, *m;
 
-        ctx = container_of(watcher, struct tundev_context, watcher);
-        tun = ctx->tun;
+    ctx = container_of(watcher, struct tundev_context, watcher);
+    tun = ctx->tun;
 
-        tunbuf = malloc(PRIMITIVE_BYTES + tun->mtu);
-        m = tunbuf + PRIMITIVE_BYTES;
+    tunbuf = malloc(PRIMITIVE_BYTES + tun->mtu);
+    m = tunbuf + PRIMITIVE_BYTES;
 
-        int mlen = read(ctx->tunfd, m, tun->mtu);
-        if (mlen <= 0) {
-            free(tunbuf);
-            return;
+    int mlen = read(ctx->tunfd, m, tun->mtu);
+    if (mlen <= 0) {
+        free(tunbuf);
+        return;
+    }
+
+    struct iphdr *iphdr = (struct iphdr *) m;
+    if (verbose) {
+        char saddr[24] = {0}, daddr[24] = {0};
+        parse_addr(iphdr, saddr, daddr);
+        logger_log(LOG_DEBUG, "Sending %ld bytes from %s to %s",
+          mlen, saddr, daddr);
+    }
+
+#ifdef XTUND
+    uv_rwlock_rdlock(&rwlock);
+    struct peer *peer = lookup_peer(iphdr->daddr, peers);
+    uv_rwlock_rdunlock(&rwlock);
+    if (peer) {
+        crypto_encrypt(tunbuf, m, mlen);
+        if (peer->tcp) {
+            tun_to_tcp_client(peer, tunbuf, PRIMITIVE_BYTES + mlen);
+        } else {
+            tun_to_udp(ctx, tunbuf, PRIMITIVE_BYTES + mlen, &peer->remote_addr);
         }
 
-        struct iphdr *iphdr = (struct iphdr *) m;
-
-        if (tun->mode == TUN_MODE_SERVER) {
-            uv_rwlock_rdlock(&rwlock);
-            struct raddr *ra = lookup_addr(iphdr->daddr, tun->raddrs);
-            uv_rwlock_rdunlock(&rwlock);
-            if (ra == NULL) {
-                char saddr[24] = {0}, daddr[24] = {0};
-                char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
-                strcpy(saddr, a);
-                a = inet_ntoa(*(struct in_addr *) &iphdr->daddr);
-                strcpy(daddr, a);
-                logger_log(LOG_ERR, "Destination address miss: %s -> %s",
-                           saddr, daddr);
-                free(tunbuf);
-                return;
-            }
-            addr = &ra->remote_addr;
-
-        } else {
+    } else {
+        char saddr[24] = {0}, daddr[24] = {0};
+        parse_addr(iphdr, saddr, daddr);
+        logger_log(LOG_ERR, "Destination address miss: %s -> %s", saddr, daddr);
+        free(tunbuf);
+    }
+#else
 #ifdef ANDROID
-            if (!tun->is_global_proxy) {
-                uint16_t frag = iphdr->frag_off & htons(0x1fff);
-                if ((iphdr->protocol == IPPROTO_UDP) && (frag == 0)) {
-                    struct udphdr *udph = (struct udphdr *)
-                                          (m + sizeof(struct iphdr));
-                    if (ntohs(udph->dest) == DNS_PORT) {
-                        int rc = handle_local_dns_query(ctx->tunfd,
-                                                        &tun->dns_server,
-                                                        m, mlen);
-                        if (rc) {
-                            return;
-                        }
-                    }
+    if (!tun->is_global_proxy) {
+        uint16_t frag = iphdr->frag_off & htons(0x1fff);
+        if ((iphdr->protocol == IPPROTO_UDP) && (frag == 0)) {
+            struct udphdr *udph = (struct udphdr *) (m + sizeof(struct iphdr));
+            if (ntohs(udph->dest) == DNS_PORT) {
+                int rc = handle_local_dns_query(ctx->tunfd, &tun->dns_server,
+                                                m, mlen);
+                if (rc) {
+                    return;
                 }
             }
-#endif
-            addr = &tun->server_addr;
         }
-
-        if (verbose) {
-            char saddr[24] = {0}, daddr[24] = {0};
-            char *addr = inet_ntoa(*((struct in_addr *) &iphdr->saddr));
-            strcpy(saddr, addr);
-            addr = inet_ntoa(*((struct in_addr *) &iphdr->daddr));
-            strcpy(daddr, addr);
-            logger_log(LOG_DEBUG, "Sending %ld bytes from %s to %s",
-                       mlen, saddr, daddr);
-        }
-
-        /* TODO: check client mode (tcp or udp) */
-        crypto_encrypt(tunbuf, m, mlen);
-        tun_to_network(ctx, tunbuf, PRIMITIVE_BYTES + mlen, addr);
     }
+#endif
+    crypto_encrypt(tunbuf, m, mlen);
+    if (tcp) {
+        tun_to_tcp_server(ctx, tunbuf, PRIMITIVE_BYTES + mlen);
+    } else {
+        tun_to_udp(ctx, tunbuf, PRIMITIVE_BYTES + mlen, &tun->addr);
+    }
+#endif
 }
 
 #ifndef ANDROID
@@ -182,7 +176,6 @@ tun_alloc() {
 
     struct tundev *tun = malloc(sizeof(*tun) + ctxsz);
     memset(tun, 0, sizeof(*tun) + ctxsz);
-    tun->mode = TUN_MODE_CLIENT;
     tun->queues = queues;
 
     struct tundev_context *ctx = tun->contexts;
@@ -203,17 +196,13 @@ tun_free(struct tundev *tun) {
 
 #ifndef ANDROID
 void
-tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode,
+tun_config(struct tundev *tun, const char *ifconf, int mtu,
            struct sockaddr *addr) {
+
     tun->mtu = mtu;
-    tun->mode = mode;
     strcpy(tun->ifconf, ifconf);
 
-    if (mode == TUN_MODE_CLIENT) {
-        tun->server_addr = *addr;
-    } else {
-        tun->bind_addr = *addr;
-    }
+    tun->addr = *addr;
 
 	char *nmask = strchr(ifconf, '/');
 	if(!nmask) {
@@ -260,14 +249,14 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode,
 		exit(1);
     }
 
-    // Activate interface.
+    /* Activate interface. */
 	ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
 	if(ioctl(inet4, SIOCSIFFLAGS, (void *)&ifr) < 0) {
         logger_stderr("ioctl(SIOCSIFFLAGS): %s", strerror(errno));
 		exit(1);
 	}
 
-    // Set MTU if it is specified.
+    /* Set MTU if it is specified. */
 	ifr.ifr_mtu = mtu;
 	if(ioctl(inet4, SIOCSIFMTU, (void *)&ifr) < 0) {
         logger_stderr("ioctl(SIOCSIFMTU): %s", strerror(errno));
@@ -284,8 +273,8 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu, int mode,
 #else
 static void
 tun_close(uv_async_t *handle) {
-    struct tundev_context *ctx =
-                container_of(handle, struct tundev_context, async_handle);
+    struct tundev_context *ctx = container_of(handle, struct tundev_context,
+                                              async_handle);
     struct tundev *tun = ctx->tun;
 
     uv_poll_stop(&ctx->watcher);
@@ -339,11 +328,6 @@ tun_config(struct tundev *tun, int fd, int mtu, int global, int v,
 #ifndef ANDROID
 void
 tun_stop(struct tundev *tun) {
-    if (tun->mode == TUN_MODE_SERVER) {
-        uv_rwlock_destroy(&rwlock);
-        clear_addrs(tun->raddrs);
-    }
-
     if (tun->queues > 1) {
         for (int i = 0; i < tun->queues; i++) {
             struct tundev_context *ctx = &tun->contexts[i];
@@ -352,9 +336,18 @@ tun_stop(struct tundev *tun) {
 
     } else {
         struct tundev_context *ctx = tun->contexts;
-        uv_close((uv_handle_t *)&ctx->inet, NULL);
+#ifdef XTUND
+        uv_close(&ctx->inet_tcp.handle, NULL);
+        uv_close((uv_handle_t *)&ctx->inet_udp, NULL);
+#else
+        if (tcp) {
+            uv_close(&ctx->inet_tcp.handle, NULL);
+        } else {
+            uv_close((uv_handle_t *)&ctx->inet_udp, NULL);
+        }
+#endif
         uv_poll_stop(&ctx->watcher);
-        // valgrind may generate a false alarm here
+        /* valgrind may generate a false alarm here */
         if(ioctl(ctx->tunfd, TUNSETPERSIST, 0) < 0) {
             logger_stderr("ioctl(TUNSETPERSIST): %s", strerror(errno));
         }
@@ -374,7 +367,7 @@ static void
 queue_close(uv_async_t *handle) {
     struct tundev_context *ctx = container_of(handle, struct tundev_context,
                                               async_handle);
-    uv_close((uv_handle_t *)&ctx->inet, NULL);
+    uv_close((uv_handle_t *)&ctx->inet_udp, NULL);
     uv_close((uv_handle_t *)&ctx->async_handle, NULL);
     uv_poll_stop(&ctx->watcher);
     /* valgrind may generate a false alarm here */
@@ -388,30 +381,29 @@ static void
 queue_start(void *arg) {
     int rc;
     uv_loop_t loop;
-    struct tundev *tun;
     struct tundev_context *ctx;
 
     ctx = arg;
-    tun = ctx->tun;
 
     uv_loop_init(&loop);
     uv_async_init(&loop, &ctx->async_handle, queue_close);
-    uv_udp_init(&loop, &ctx->inet);
+    uv_udp_init(&loop, &ctx->inet_udp);
 
-    if ((rc = uv_udp_open(&ctx->inet, ctx->inet_fd))) {
+    if ((rc = uv_udp_open(&ctx->inet_udp, ctx->inet_fd))) {
         logger_stderr("UDP open error: %s", uv_strerror(rc));
         exit(1);
     }
 
-    if (tun->mode == TUN_MODE_SERVER) {
-        rc = uv_udp_bind(&ctx->inet, &tun->bind_addr, UV_UDP_REUSEADDR);
-        if (rc) {
-            logger_stderr("Bind error: %s", uv_strerror(rc));
-            exit(1);
-        }
+#ifdef XTUND
+    struct tundev *tun = ctx->tun;
+    rc = uv_udp_bind(&ctx->inet_udp, &tun->addr, UV_UDP_REUSEADDR);
+    if (rc) {
+        logger_stderr("Bind error: %s", uv_strerror(rc));
+        exit(1);
     }
+#endif
 
-    uv_udp_recv_start(&ctx->inet, inet_alloc_cb, inet_recv_cb);
+    /* uv_udp_recv_start(&ctx->inet_udp, inet_alloc_cb, inet_recv_cb); */
 
     uv_poll_init(&loop, &ctx->watcher, ctx->tunfd);
     uv_poll_start(&ctx->watcher, UV_READABLE, poll_cb);
@@ -467,41 +459,24 @@ signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data) {
     }
 }
 
-static int
-udp_start(struct tundev *tun, uv_loop_t *loop) {
-    struct tundev_context *ctx = tun->contexts;
-
-    uv_udp_init(loop, &ctx->inet);
-
-    if (tun->mode == TUN_MODE_SERVER) {
-        int err = uv_udp_bind(&ctx->inet, &tun->bind_addr, UV_UDP_REUSEADDR);
-        if (err) {
-            logger_stderr("bind error: %s", uv_strerror(err));
-            return 1;
-        }
-    }
-
-    return uv_udp_recv_start(&ctx->inet, inet_alloc_cb, inet_recv_cb);
-}
-
 int
 tun_start(struct tundev *tun) {
-    int i, err;
+    int i;
     uv_loop_t *loop = uv_default_loop();
 
-    if (tun->mode == TUN_MODE_SERVER) {
-        uv_rwlock_init(&rwlock);
-        for (i = 0; i < HASHSIZE; i++) {
-            tun->raddrs[i] = NULL;
-        }
+#ifdef XTUND
+    uv_rwlock_init(&rwlock);
+    for (i = 0; i < HASHSIZE; i++) {
+        peers[i] = NULL;
     }
+#endif
 
     if (tun->queues > 1) {
         for (i = 0; i < tun->queues; i++) {
             uv_thread_t thread_id;
             struct tundev_context *ctx = &tun->contexts[i];
-            err = uv_sem_init(&ctx->semaphore, 0);
-            err = uv_thread_create(&thread_id, queue_start, ctx);
+            uv_sem_init(&ctx->semaphore, 0);
+            uv_thread_create(&thread_id, queue_start, ctx);
         }
 
         signal_install(loop, signal_cb, tun);
@@ -516,15 +491,20 @@ tun_start(struct tundev *tun) {
     } else {
         struct tundev_context *ctx = tun->contexts;
 
+#ifdef XTUND
+        tcp_start(ctx, loop);
+        udp_start(ctx, loop);
+#else
         if (tcp) {
-            tcp_start(tun, loop);
+            tcp_start(ctx, loop);
         } else {
-            udp_start(tun, loop);
+            udp_start(ctx, loop);
         }
+#endif
 
 #ifdef ANDROID
         uv_os_fd_t fd = 0;
-        err = uv_fileno((uv_handle_t*) &ctx->inet, &fd);
+        err = uv_fileno((uv_handle_t *) &ctx->inet_udp, &fd);
         if (err) {
             logger_log(LOG_ERR, "Get fileno error: %s", uv_strerror(err));
             return 1;
@@ -542,6 +522,10 @@ tun_start(struct tundev *tun) {
 
         uv_run(loop, UV_RUN_DEFAULT);
 
+#ifdef XTUND
+        uv_rwlock_destroy(&rwlock);
+        clear_peers(peers);
+#endif
         loop_close(loop);
     }
 

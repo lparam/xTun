@@ -23,6 +23,7 @@
 #define HASHSIZE 256
 
 struct raddr {
+    int              tcp;
 	struct raddr    *next;
     struct in_addr   tun_addr;
 	struct sockaddr  remote_addr;

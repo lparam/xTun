@@ -45,7 +45,6 @@ send_cb(uv_write_t *req, int status) {
 static void
 recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     if (nread > 0) {
-        /* reset_timer(client); */
         struct packet *packet = stream->data;
         int rc = packet_filter(packet, buf->base, nread);
         if (rc == PACKET_UNCOMPLETE) {
@@ -85,8 +84,8 @@ err:
 static void
 receive_from_server(struct tundev_context *ctx) {
     packet_reset(ctx->packet);
-    ctx->inet_tcp.data = ctx->packet;
-    uv_read_start((uv_stream_t *) &ctx->inet_tcp, alloc_cb, recv_cb);
+    ctx->inet_tcp.stream.data = ctx->packet;
+    uv_read_start(&ctx->inet_tcp.stream, alloc_cb, recv_cb);
 }
 
 static void
@@ -106,7 +105,7 @@ connect_cb(uv_connect_t *req, int status) {
 static void
 connect_to_server(struct tundev_context *ctx) {
     struct tundev *tun = ctx->tun;
-    int rc = uv_tcp_connect(&ctx->connect_req, &ctx->inet_tcp,
+    int rc = uv_tcp_connect(&ctx->connect_req, &ctx->inet_tcp.tcp,
                             &tun->server_addr, connect_cb);
     if (rc) {
         logger_log(LOG_ERR, "connect to server error: %s", uv_strerror(rc));

@@ -9,8 +9,11 @@ struct tundev_context {
     int             inet_fd;
     uint8_t        *network_buffer;
     uv_udp_t        inet;
-    uv_tcp_t        inet_tcp;
-    uv_write_t      write_req;
+    union {
+        uv_handle_t handle;
+        uv_stream_t stream;
+        uv_tcp_t tcp;
+    } inet_tcp;
     uv_connect_t    connect_req;
     uv_poll_t       watcher;
     uv_sem_t        semaphore;

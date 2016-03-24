@@ -377,7 +377,7 @@ queue_close(uv_async_t *handle) {
     uv_close((uv_handle_t *)&ctx->inet, NULL);
     uv_close((uv_handle_t *)&ctx->async_handle, NULL);
     uv_poll_stop(&ctx->watcher);
-    // valgrind may generate a false alarm here
+    /* valgrind may generate a false alarm here */
     if(ioctl(ctx->tunfd, TUNSETPERSIST, 0) < 0) {
         logger_stderr("ioctl(TUNSETPERSIST): %s", strerror(errno));
         close(ctx->tunfd);

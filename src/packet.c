@@ -13,7 +13,7 @@ packet_filter(struct packet *packet, const char *buf, ssize_t buflen) {
         assert(buflen <= HEADER_BYTES);
 
         if (packet->read == 1) {
-            packet->size = read_size((uint8_t *)packet->buf);
+            packet->size = read_size((uint8_t *) packet->buf);
             rc = PACKET_UNCOMPLETE;
 
         } else {
@@ -22,7 +22,7 @@ packet_filter(struct packet *packet, const char *buf, ssize_t buflen) {
                 rc = PACKET_UNCOMPLETE;
 
             } else if (buflen == HEADER_BYTES) {
-                packet->size = read_size((uint8_t *)buf);
+                packet->size = read_size((uint8_t *) buf);
                 rc = packet->size > 0 ? PACKET_UNCOMPLETE : PACKET_INVALID;
 
             } else {

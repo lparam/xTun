@@ -13,6 +13,7 @@
 #include "crypto.h"
 #include "daemon.h"
 #include "tun.h"
+#include "xTun.h"
 
 
 static int mtu = MTU;
@@ -32,10 +33,11 @@ static char *xsignal;
 
 int signal_process(char *signal, const char *pidfile);
 
-static const char *_optString = "i:I:k:s:l:p:P:nVvh";
+static const char *_optString = "i:I:m:k:s:b:tp:P:nVvh";
 static const struct option _lopts[] = {
     { "",        required_argument,   NULL, 'i' },
     { "",        required_argument,   NULL, 'I' },
+    { "",        required_argument,   NULL, 'm' },
     { "",        required_argument,   NULL, 'k' },
     { "",        required_argument,   NULL, 's' },
     { "",        required_argument,   NULL, 'b' },
@@ -43,7 +45,7 @@ static const struct option _lopts[] = {
     { "",        required_argument,   NULL, 'P' },
     { "mtu",     required_argument,   NULL,  0  },
 #ifndef XTUND
-    { "tcp",     required_argument,   NULL,  0  },
+    { "tcp",     no_argument,         NULL, 't' },
 #endif
     { "signal",  required_argument,   NULL,  0  },
     { "version", no_argument,         NULL, 'v' },
@@ -61,6 +63,7 @@ print_usage(const char *prog) {
     printf("Options:\n");
     puts("  -i <iface>\t\t interface name (e.g. tun0)\n"
          "  -I <ifconf>\t\t IP address of interface (e.g. 10.3.0.1/16)\n"
+         "  -m <mode>\t\t client or server\n"
          "  -k <encryption_key>\t shared password for data encryption\n"
          "  -s <server address>\t server address:port (only available in client mode)\n"
          "  [-b <bind address>]\t bind address:port (only available in server mode, default: 0.0.0.0:1082)\n"
@@ -109,6 +112,9 @@ parse_opts(int argc, char *argv[]) {
                 parallel = 1;
             }
             break;
+        case 't':
+            tcp = 1;
+            break;
         case 'n':
             daemon_mode = 0;
             break;
@@ -141,7 +147,6 @@ parse_opts(int argc, char *argv[]) {
             }
 #ifndef XTUND
             if (strcmp("tcp", _lopts[longindex].name) == 0) {
-                extern int tcp;
                 tcp = 1;
             }
 #endif

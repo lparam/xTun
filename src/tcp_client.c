@@ -1,17 +1,3 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <assert.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <linux/if.h>
-#include <linux/if_tun.h>
-#include <netinet/ip.h>
-#include <netinet/udp.h>
-
 #include "uv.h"
 
 #include "crypto.h"
@@ -19,8 +5,22 @@
 #include "packet.h"
 #include "util.h"
 #include "tun.h"
-#include "tun_imp.h"
 
+
+static void
+timer_expire(uv_timer_t *handle) {
+    struct tundev_context *ctx = container_of(handle, struct tundev_context,
+                                              timer);
+    connect_to_server(ctx);
+}
+
+static void
+reconnect(struct tundev_context *ctx) {
+    ctx->interval *= 2;
+    int timeout = ctx->interval < MAX_RETRY_INTERVAL ?
+                  ctx->interval : MAX_RETRY_INTERVAL;
+    uv_timer_start(&ctx->timer, timer_expire, timeout * 1000, 0);
+}
 
 static void
 alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
@@ -40,17 +40,21 @@ static void
 send_cb(uv_write_t *req, int status) {
     if (status) {
         /* TODO: reconnect to server */
-        logger_log(LOG_ERR, "send to server failed: %s", uv_strerror(status));
+        logger_log(LOG_ERR, "Send to server failed: %s", uv_strerror(status));
+        struct tundev_context *ctx = req->data;
+        ctx->connect = DISCONNECTED;
     }
+    uv_buf_t *buf = (uv_buf_t *) (req + 1);
+    free(buf->base);
+    free(req);
 }
 
 static void
 recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
-    if (nread > 0) {
-        struct tundev_context *ctx = container_of(stream,
-                                                  struct tundev_context,
-                                                  inet_tcp);
+    struct tundev_context *ctx = container_of(stream, struct tundev_context,
+                                              inet_tcp);
 
+    if (nread > 0) {
         struct packet *packet = &ctx->packet;
         int rc = packet_filter(packet, buf->base, nread);
         if (rc == PACKET_UNCOMPLETE) {
@@ -68,22 +72,14 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
             goto err;
         }
 
-        if (verbose) {
-            struct iphdr *iphdr = (struct iphdr *) m;
-            char saddr[24] = {0}, daddr[24] = {0};
-            parse_addr(iphdr, saddr, daddr);
-            logger_log(LOG_DEBUG, "Received %ld bytes from %s to %s",
-                       mlen, saddr, daddr);
-        }
-
         network_to_tun(ctx->tunfd, m, mlen);
 
         packet_reset(packet);
 
     } else if (nread < 0) {
-        /* TODO: reconnect to server */
+        ctx->connect = DISCONNECTED;
         if (nread != UV_EOF) {
-            logger_log(LOG_ERR, "receive from server failed: %s",
+            logger_log(LOG_ERR, "Receive from server failed: %s",
                        uv_strerror(nread));
         }
     }
@@ -91,7 +87,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     return;
 
 err:
-    logger_log(LOG_ERR, "invalid tcp packet");
+    logger_log(LOG_ERR, "Invalid tcp packet");
 }
 
 static void
@@ -102,20 +98,27 @@ receive_from_server(struct tundev_context *ctx) {
 
 static void
 connect_cb(uv_connect_t *req, int status) {
+    struct tundev_context *ctx = container_of(req, struct tundev_context,
+                                              connect_req);
     if (status == 0) {
-        struct tundev_context *ctx = container_of(req, struct tundev_context,
-                                                  connect_req);
+        ctx->interval = 5;
+        ctx->connect = CONNECTED;
+        uv_timer_stop(&ctx->timer);
         receive_from_server(ctx);
     } else {
         if (status != UV_ECANCELED) {
             logger_log(LOG_ERR, "Connect to server failed: %s",
                        uv_strerror(status));
+            uv_close(&ctx->inet_tcp.handle, NULL);
+            reconnect(ctx);
         }
     }
 }
 
-static void
+void
 connect_to_server(struct tundev_context *ctx) {
+    ctx->connect = CONNECTING;
+    uv_tcp_init(ctx->timer.loop, &ctx->inet_tcp.tcp);
     int rc = uv_tcp_connect(&ctx->connect_req, &ctx->inet_tcp.tcp,
                             &ctx->tun->addr, connect_cb);
     if (rc) {
@@ -125,10 +128,9 @@ connect_to_server(struct tundev_context *ctx) {
 }
 
 int
-tcp_start(struct tundev_context *ctx, uv_loop_t *loop) {
-    ctx->packet.buf = malloc(ctx->tun->mtu);
-    packet_reset(&ctx->packet);
-    uv_tcp_init(loop, &ctx->inet_tcp.tcp);
+tcp_client_start(struct tundev_context *ctx, uv_loop_t *loop) {
+    ctx->interval = 5;
+    uv_timer_init(loop, &ctx->timer);
     connect_to_server(ctx);
     return 0;
 }

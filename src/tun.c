@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,7 +18,6 @@
 #include "crypto.h"
 #include "peer.h"
 #include "tun.h"
-#include "tun_imp.h"
 #ifdef ANDROID
 #include "android.h"
 #endif
@@ -73,23 +71,18 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
         return;
     }
 
-    struct iphdr *iphdr = (struct iphdr *) m;
-    if (verbose) {
-        char saddr[24] = {0}, daddr[24] = {0};
-        parse_addr(iphdr, saddr, daddr);
-        logger_log(LOG_DEBUG, "Sending %ld bytes from %s to %s",
-          mlen, saddr, daddr);
-    }
-
 #ifdef XTUND
+    struct iphdr *iphdr = (struct iphdr *) m;
+
     uv_rwlock_rdlock(&rwlock);
     struct peer *peer = lookup_peer(iphdr->daddr, peers);
     uv_rwlock_rdunlock(&rwlock);
     if (peer) {
-        crypto_encrypt(tunbuf, m, mlen);
         if (peer->tcp) {
+            crypto_encrypt(tunbuf, m, mlen);
             tun_to_tcp_client(peer, tunbuf, PRIMITIVE_BYTES + mlen);
         } else {
+            crypto_encrypt(tunbuf, m, mlen);
             tun_to_udp(ctx, tunbuf, PRIMITIVE_BYTES + mlen, &peer->remote_addr);
         }
 
@@ -101,7 +94,8 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
     }
 #else
 #ifdef ANDROID
-    if (!tun->is_global_proxy) {
+    if (!tun->global) {
+        struct iphdr *iphdr = (struct iphdr *) m;
         uint16_t frag = iphdr->frag_off & htons(0x1fff);
         if ((iphdr->protocol == IPPROTO_UDP) && (frag == 0)) {
             struct udphdr *udph = (struct udphdr *) (m + sizeof(struct iphdr));
@@ -115,10 +109,20 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
         }
     }
 #endif
-    crypto_encrypt(tunbuf, m, mlen);
     if (tcp) {
-        tun_to_tcp_server(ctx, tunbuf, PRIMITIVE_BYTES + mlen);
+        if (ctx->connect == CONNECTED) {
+            crypto_encrypt(tunbuf, m, mlen);
+            tun_to_tcp_server(ctx, tunbuf, PRIMITIVE_BYTES + mlen);
+
+        } else {
+            free(tunbuf);
+            if (ctx->connect == DISCONNECTED) {
+                connect_to_server(ctx);
+            }
+        }
+
     } else {
+        crypto_encrypt(tunbuf, m, mlen);
         tun_to_udp(ctx, tunbuf, PRIMITIVE_BYTES + mlen, &tun->addr);
     }
 #endif
@@ -180,6 +184,7 @@ tun_alloc() {
 
     struct tundev_context *ctx = tun->contexts;
     ctx->tun = tun;
+    ctx->interval = 5;
 
     return tun;
 }
@@ -190,6 +195,7 @@ tun_free(struct tundev *tun) {
     int i;
     for (i = 0; i < tun->queues; i++) {
         free(tun->contexts[i].network_buffer);
+        free(tun->contexts[i].packet.buf);
     }
     free(tun);
 }
@@ -268,6 +274,7 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu,
     for (int i = 0; i < tun->queues; i++) {
         struct tundev_context *ctx = &tun->contexts[i];
         ctx->network_buffer = malloc(mtu + PRIMITIVE_BYTES);
+        ctx->packet.buf = malloc(ctx->tun->mtu);
     }
 }
 #else
@@ -285,21 +292,18 @@ tun_close(uv_async_t *handle) {
         clear_dns_query();
     }
 
-    free(ctx->network_buffer);
-    free(tun);
+    tun_free(tun);
 
     logger_log(LOG_WARNING, "xTun stoped.");
 }
 
 int
 tun_config(struct tundev *tun, int fd, int mtu, int global, int v,
-           const char *server, const char *dns) {
-    int rc;
+           const char *server, const char *dns)
+{
     struct sockaddr addr;
-    struct tundev_context *ctx;
 
-    rc = resolve_addr(server, &addr);
-    if (rc) {
+    if (resolve_addr(server, &addr)) {
         logger_stderr("Invalid server address");
         return 1;
     }
@@ -314,7 +318,7 @@ tun_config(struct tundev *tun, int fd, int mtu, int global, int v,
     tun->server_addr = addr;
     tun->is_global_proxy = global;
 
-    ctx = tun->contexts;
+    struct tundev_context *ctx = tun->contexts;
     ctx->tunfd = fd;
     ctx->network_buffer = malloc(mtu + PRIMITIVE_BYTES);
 
@@ -341,11 +345,15 @@ tun_stop(struct tundev *tun) {
         uv_close((uv_handle_t *)&ctx->inet_udp, NULL);
 #else
         if (tcp) {
-            uv_close(&ctx->inet_tcp.handle, NULL);
+            if (uv_is_active(&ctx->inet_tcp.handle)) {
+                uv_close(&ctx->inet_tcp.handle, NULL);
+            }
+            uv_close((uv_handle_t *) &ctx->timer, NULL);
         } else {
-            uv_close((uv_handle_t *)&ctx->inet_udp, NULL);
+            uv_close((uv_handle_t *) &ctx->inet_udp, NULL);
         }
 #endif
+        /* TODO: Close tun when all clients disconnected */
         uv_poll_stop(&ctx->watcher);
         /* valgrind may generate a false alarm here */
         if(ioctl(ctx->tunfd, TUNSETPERSIST, 0) < 0) {
@@ -353,7 +361,6 @@ tun_stop(struct tundev *tun) {
         }
         close(ctx->tunfd);
     }
-
 }
 #else
 void
@@ -379,31 +386,13 @@ queue_close(uv_async_t *handle) {
 
 static void
 queue_start(void *arg) {
-    int rc;
+    struct tundev_context *ctx = arg;
     uv_loop_t loop;
-    struct tundev_context *ctx;
-
-    ctx = arg;
 
     uv_loop_init(&loop);
     uv_async_init(&loop, &ctx->async_handle, queue_close);
-    uv_udp_init(&loop, &ctx->inet_udp);
 
-    if ((rc = uv_udp_open(&ctx->inet_udp, ctx->inet_fd))) {
-        logger_stderr("UDP open error: %s", uv_strerror(rc));
-        exit(1);
-    }
-
-#ifdef XTUND
-    struct tundev *tun = ctx->tun;
-    rc = uv_udp_bind(&ctx->inet_udp, &tun->addr, UV_UDP_REUSEADDR);
-    if (rc) {
-        logger_stderr("Bind error: %s", uv_strerror(rc));
-        exit(1);
-    }
-#endif
-
-    /* uv_udp_recv_start(&ctx->inet_udp, inet_alloc_cb, inet_recv_cb); */
+    udp_start(ctx, &loop);
 
     uv_poll_init(&loop, &ctx->watcher, ctx->tunfd);
     uv_poll_start(&ctx->watcher, UV_READABLE, poll_cb);
@@ -492,11 +481,11 @@ tun_start(struct tundev *tun) {
         struct tundev_context *ctx = tun->contexts;
 
 #ifdef XTUND
-        tcp_start(ctx, loop);
+        tcp_server_start(ctx, loop);
         udp_start(ctx, loop);
 #else
         if (tcp) {
-            tcp_start(ctx, loop);
+            tcp_client_start(ctx, loop);
         } else {
             udp_start(ctx, loop);
         }

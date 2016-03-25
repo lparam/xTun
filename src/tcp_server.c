@@ -1,16 +1,4 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <assert.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <linux/if.h>
-#include <linux/if_tun.h>
-#include <netinet/ip.h>
-#include <netinet/udp.h>
 
 #include "uv.h"
 
@@ -20,8 +8,6 @@
 #include "util.h"
 #include "peer.h"
 #include "tun.h"
-#include "tun_imp.h"
-#include "xTund.h"
 
 
 struct client_context {
@@ -40,11 +26,16 @@ new_client(int packet_size) {
     struct client_context *client = malloc(sizeof(*client));
     memset(client, 0, sizeof(*client));
     client->packet.buf = malloc(packet_size);
+    packet_reset(&client->packet);
     return client;
 }
 
 static void
 free_client(struct client_context *client) {
+    if (client->peer) {
+        client->peer->tcp = 0;
+        client->peer->data = NULL;
+    }
     free(client->packet.buf);
     free(client);
 }
@@ -116,19 +107,12 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         }
 
         struct iphdr *iphdr = (struct iphdr *) m;
-        char saddr[24] = {0}, daddr[24] = {0};
-
-        if (verbose) {
-            parse_addr(iphdr, saddr, daddr);
-            logger_log(LOG_DEBUG, "Received %ld bytes from %s to %s",
-                       mlen, saddr, daddr);
-        }
-
         if (client->peer == NULL) {
             uv_rwlock_rdlock(&rwlock);
             struct peer *peer = lookup_peer(iphdr->saddr, peers);
             uv_rwlock_rdunlock(&rwlock);
             if (peer == NULL) {
+                char saddr[24] = {0}, daddr[24] = {0};
                 parse_addr(iphdr, saddr, daddr);
                 logger_log(LOG_WARNING, "Cache miss: %s -> %s", saddr, daddr);
 
@@ -139,10 +123,11 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
                 uv_rwlock_wrlock(&rwlock);
                 peer = save_peer(iphdr->saddr, &addr, peers);
                 uv_rwlock_wrunlock(&rwlock);
-
-                peer->tcp = 1;
-                peer->data = client;
             }
+
+            peer->tcp = 1;
+            peer->data = client;
+            client->peer = peer;
         }
 
         struct tundev_context *ctx = stream->data;
@@ -167,7 +152,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     return;
 
 error:
-    logger_log(LOG_ERR, "invalid tcp packet");
+    logger_log(LOG_ERR, "Invalid tcp packet");
     close_client(client);
 }
 
@@ -188,7 +173,7 @@ accept_cb(uv_stream_t *stream, int status) {
 }
 
 int
-tcp_start(struct tundev_context *ctx, uv_loop_t *loop) {
+tcp_server_start(struct tundev_context *ctx, uv_loop_t *loop) {
     uv_tcp_init(loop, &ctx->inet_tcp.tcp);
     int rc = uv_tcp_bind(&ctx->inet_tcp.tcp, &ctx->tun->addr, 0);
     if (rc) {
@@ -219,5 +204,8 @@ tun_to_tcp_client(struct peer *peer, uint8_t *buf, int len) {
 
         req->data = client;
         uv_write(req, &client->handle.stream, bufs, 2, send_cb);
+
+    } else {
+        free(buf);
     }
 }

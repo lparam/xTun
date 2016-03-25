@@ -18,10 +18,7 @@
 #include "crypto.h"
 #include "peer.h"
 #include "tun.h"
-#include "tun_imp.h"
 
-
-#define HASHSIZE 256
 
 static void
 inet_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
@@ -43,17 +40,6 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
         if (rc) {
             logger_log(LOG_ERR, "Invalid packet");
             return;
-        }
-
-        if (verbose) {
-            char saddr[24] = {0}, daddr[24] = {0};
-            struct iphdr *iphdr = (struct iphdr *) m;
-            char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
-            strcpy(saddr, a);
-            a = inet_ntoa(*(struct in_addr *) &iphdr->daddr);
-            strcpy(daddr, a);
-            logger_log(LOG_DEBUG, "Received %ld bytes from %s to %s",
-                       mlen, saddr, daddr);
         }
 
         struct tundev_context *ctx = container_of(handle, struct tundev_context,
@@ -114,11 +100,17 @@ int
 udp_start(struct tundev_context *ctx, uv_loop_t *loop) {
     uv_udp_init(loop, &ctx->inet_udp);
 
+    int rc;
+    if ((rc = uv_udp_open(&ctx->inet_udp, ctx->inet_fd))) {
+        logger_stderr("udp open error: %s", uv_strerror(rc));
+        exit(1);
+    }
+
 #ifdef XTUND
-    int rc = uv_udp_bind(&ctx->inet_udp, &ctx->tun->addr, UV_UDP_REUSEADDR);
+    rc = uv_udp_bind(&ctx->inet_udp, &ctx->tun->addr, UV_UDP_REUSEADDR);
     if (rc) {
-        logger_stderr("bind error: %s", uv_strerror(rc));
-        return 1;
+        logger_stderr("udp bind error: %s", uv_strerror(rc));
+        exit(1);
     }
 #endif
 

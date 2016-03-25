@@ -134,7 +134,7 @@ $(XTUN): \
 	src/signal.c \
 	src/crypto.c \
 	src/packet.c \
-	src/xTun_tcp.c \
+	src/tcp_client.c \
 	src/udp.c \
 	src/tun.c \
 	src/main.c
@@ -148,7 +148,7 @@ $(XTUND): \
 	src/crypto.c \
 	src/peer.c \
 	src/packet.c \
-	src/xTund_tcp.c \
+	src/tcp_server.c \
 	src/udp.c \
 	src/tun.c \
 	src/main.c

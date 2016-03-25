@@ -101,6 +101,7 @@ dump_hex(const void *data, uint32_t len, char *title) {
     print_buffer(data, len, 1, 16);
 }
 
+/* TODO: direct put port */
 int
 resolve_addr(const char *buf, struct sockaddr *addr) {
     char *p;
@@ -143,7 +144,7 @@ resolve_addr(const char *buf, struct sockaddr *addr) {
                 goto err;
             }
 
-            // IPV4 priority
+            /* IPV4 priority */
             for (rp = result; rp != NULL; rp = rp->ai_next) {
                 if (rp->ai_family == AF_INET) {
                     memcpy(addr, rp->ai_addr, sizeof(struct sockaddr_in));

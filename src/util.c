@@ -103,31 +103,20 @@ dump_hex(const void *data, uint32_t len, char *title) {
 
 /* TODO: direct put port */
 int
-resolve_addr(const char *buf, struct sockaddr *addr) {
-    char *p;
-    char *tmp = strdup(buf);
+resolve_addr(const char *buf, int port, struct sockaddr *addr) {
     int rc = 0;
-    long port;
     struct sockaddr_in addr4;
     struct sockaddr_in6 addr6;
 
-    if ((p = strrchr(tmp, ':')) == NULL) {
-        logger_log(LOG_ERR, "Address must contain port number: %s", tmp);
-        rc = 1;
-        goto err;
-    }
-    *p++ = '\0';
-
-    port = strtol(p, NULL, 10);
     if ((port <= 0) || (port >= 65536)) {
-        logger_log(LOG_ERR, "Invalid port number: %s", p);
+        logger_log(LOG_ERR, "Invalid port number: %d", port);
         rc = 1;
         goto err;
     }
 
     /* If the IP address contains ':', it's IPv6; otherwise, IPv4 or domain. */
-    if (strchr(tmp, ':') == NULL) {
-        rc = uv_ip4_addr(tmp, port, &addr4);
+    if (strchr(buf, ':') == NULL) {
+        rc = uv_ip4_addr(buf, port, &addr4);
         if (rc) {
             struct addrinfo hints;
             struct addrinfo *result, *rp;
@@ -137,9 +126,11 @@ resolve_addr(const char *buf, struct sockaddr *addr) {
             hints.ai_socktype = SOCK_STREAM;
             rc = 0;
 
-            int err = getaddrinfo(tmp, p, &hints, &result);
+            char service[6];
+            snprintf(service, 6, "%d", port);
+            int err = getaddrinfo(buf, service, &hints, &result);
             if (err != 0) {
-                logger_stderr("Resolve %s error: %s", tmp, gai_strerror(err));
+                logger_stderr("Resolve %s error: %s", buf, gai_strerror(err));
                 rc = 1;
                 goto err;
             }
@@ -162,7 +153,7 @@ resolve_addr(const char *buf, struct sockaddr *addr) {
             }
 
             if (rp == NULL) {
-                logger_stderr("Failed to resolve address: %s", tmp);
+                logger_stderr("Failed to resolve address: %s", buf);
                 rc = 1;
             }
 
@@ -174,12 +165,11 @@ resolve_addr(const char *buf, struct sockaddr *addr) {
         }
 
     } else {
-        uv_ip6_addr(tmp, port, &addr6);
+        uv_ip6_addr(buf, port, &addr6);
         *addr = *(struct sockaddr*)&addr6;
     }
 
 err:
-    free(tmp);
     return rc;
 }
 

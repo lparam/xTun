@@ -175,13 +175,25 @@ accept_cb(uv_stream_t *stream, int status) {
 int
 tcp_server_start(struct tundev_context *ctx, uv_loop_t *loop) {
     uv_tcp_init(loop, &ctx->inet_tcp.tcp);
-    int rc = uv_tcp_bind(&ctx->inet_tcp.tcp, &ctx->tun->addr, 0);
+
+    int rc;
+    if ((rc = uv_tcp_open(&ctx->inet_tcp.tcp, ctx->inet_tcp_fd))) {
+        logger_stderr("tcp open error: %s", uv_strerror(rc));
+        exit(1);
+    }
+
+    uv_tcp_bind(&ctx->inet_tcp.tcp, &ctx->tun->addr, 0);
     if (rc) {
         logger_stderr("tcp bind error: %s", uv_strerror(rc));
-        return 1;
+        exit(1);
     }
     ctx->inet_tcp.tcp.data = ctx;
-    return uv_listen(&ctx->inet_tcp.stream, 128, accept_cb);
+    rc = uv_listen(&ctx->inet_tcp.stream, 128, accept_cb);
+    if (rc) {
+        logger_stderr("tcp listen error: %s", uv_strerror(rc));
+        exit(1);
+    }
+    return rc;
 }
 
 void

@@ -17,17 +17,13 @@
 
 
 static int mtu = MTU;
+static int port = 1082;
 static int daemon_mode = 1;
 static uint32_t parallel = 1;
 static char *iface;
 static char *ifconf;
-#ifdef XTUND
-static char *addrbuf = "0.0.0.0:1082";
-static char *pidfile = "/var/run/xTund.pid";
-#else
 static char *addrbuf;
 static char *pidfile = "/var/run/xTun.pid";
-#endif
 static char *password = NULL;
 static char *xsignal;
 
@@ -43,10 +39,9 @@ static const struct option _lopts[] = {
     { "",        required_argument,   NULL, 'b' },
     { "",        required_argument,   NULL, 'p' },
     { "",        required_argument,   NULL, 'P' },
+    { "",        no_argument,         NULL, 't' },
     { "mtu",     required_argument,   NULL,  0  },
-#ifndef XTUND
-    { "tcp",     no_argument,         NULL, 't' },
-#endif
+    { "pid",     required_argument,   NULL,  0  },
     { "signal",  required_argument,   NULL,  0  },
     { "version", no_argument,         NULL, 'v' },
     { "",        no_argument,         NULL, 'n' },
@@ -66,13 +61,11 @@ print_usage(const char *prog) {
          "  -m <mode>\t\t client or server\n"
          "  -k <encryption_key>\t shared password for data encryption\n"
          "  -s <server address>\t server address:port (only available in client mode)\n"
+         "  [-t]\t\t tcp mode\n"
          "  [-b <bind address>]\t bind address:port (only available in server mode, default: 0.0.0.0:1082)\n"
          "  [-p <pid_file>]\t PID file of daemon (default: /var/run/xTun.pid)\n"
          "  [-P <parallel>]\t number of parallel instance to run\n"
          "  [--mtu <mtu>]\t\t MTU size (default: 1440)\n"
-#ifndef XTUND
-         "  [--tcp]\t\t tcp mode\n"
-#endif
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
          "  [-n]\t\t\t non daemon mode\n"
          "  [-h, --help]\t\t this help\n"
@@ -94,6 +87,13 @@ parse_opts(int argc, char *argv[]) {
         case 'I':
             ifconf = optarg;
             break;
+        case 'm':
+            if (strcmp("server", optarg) == 0) {
+                mode = xTUN_SERVER;
+            } else if (strcmp("client", optarg) == 0) {
+                mode = xTUN_CLIENT;
+            }
+            break;
         case 'k':
             password = optarg;
             break;
@@ -104,7 +104,7 @@ parse_opts(int argc, char *argv[]) {
             addrbuf = optarg;
             break;
         case 'p':
-            pidfile = optarg;
+            port = strtol(optarg, NULL, 10);
             break;
         case 'P':
             parallel = strtoul(optarg, NULL, 10);
@@ -113,7 +113,7 @@ parse_opts(int argc, char *argv[]) {
             }
             break;
         case 't':
-            tcp = 1;
+            protocol = xTUN_TCP;
             break;
         case 'n':
             daemon_mode = 0;
@@ -145,11 +145,9 @@ parse_opts(int argc, char *argv[]) {
                     mtu = MTU;
                 }
             }
-#ifndef XTUND
-            if (strcmp("tcp", _lopts[longindex].name) == 0) {
-                tcp = 1;
+            if (strcmp("pid", _lopts[longindex].name) == 0) {
+                pidfile = optarg;
             }
-#endif
 			break;
         default:
             print_usage(argv[0]);
@@ -184,17 +182,25 @@ main(int argc, char *argv[]) {
         return signal_process(xsignal, pidfile);
     }
 
-    if (!iface || !ifconf || !password) {
+    if (!mode || !iface || !ifconf || !password) {
         print_usage(argv[0]);
         return 1;
     }
 
-#ifndef XTUND
     if (!addrbuf) {
-        print_usage(argv[0]);
-        return 1;
+        if (mode == xTUN_SERVER) {
+            addrbuf = "0.0.0.0";
+        } else {
+            print_usage(argv[0]);
+            return 1;
+        }
     }
-#endif
+
+    protocol = protocol ? protocol : xTUN_UDP;
+
+    if (protocol == xTUN_TCP && mode == xTUN_CLIENT) {
+        parallel = 1;
+    }
 
     if (daemon_mode) {
         if (daemonize()) {
@@ -210,7 +216,7 @@ main(int argc, char *argv[]) {
 
     struct sockaddr addr;
 
-    int rc = resolve_addr(addrbuf, &addr);
+    int rc = resolve_addr(addrbuf, port, &addr);
     if (rc) {
         logger_stderr("invalid address");
         return 1;

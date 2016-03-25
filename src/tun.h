@@ -27,7 +27,8 @@
 
 struct tundev_context {
 	int             tunfd;
-    int             inet_fd;
+    int             inet_tcp_fd;
+    int             inet_udp_fd;
     int             connect; /* TCP client */
     int             interval;
     uint8_t        *network_buffer; /* UDP */
@@ -60,21 +61,17 @@ struct tundev {
     struct tundev_context  contexts[0];
 };
 
-#ifdef XTUND
 #define HASHSIZE 256
 
 struct peer *peers[HASHSIZE];
 uv_rwlock_t rwlock;
-#endif
 
-int tcp;
+int protocol;
 uint8_t mode;
 int verbose;
 
 void network_to_tun(int tunfd, uint8_t *buf, ssize_t len);
-#ifdef XTUND
 void tun_to_tcp_client(struct peer *peer, uint8_t *buf, int len);
-#endif
 void connect_to_server(struct tundev_context *ctx);
 void tun_to_tcp_server(struct tundev_context *ctx, uint8_t *buf, int len);
 void tun_to_udp(struct tundev_context *ctx, uint8_t *buf, int len,

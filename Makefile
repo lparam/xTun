@@ -97,14 +97,13 @@ endif
 LDFLAGS += $(LIBS)
 
 XTUN=$(OBJTREE)/xTun
-XTUND=$(OBJTREE)/xTund
 XTUN_STATIC=$(OBJTREE)/libxTun.a
 
 #########################################################################
 include $(SRCTREE)/config.mk
 #########################################################################
 
-all: libuv libsodium $(XTUN) $(XTUND)
+all: libuv libsodium $(XTUN)
 android: libuv libsodium $(XTUN_STATIC)
 
 3rd/libuv/autogen.sh:
@@ -128,31 +127,19 @@ $(OBJTREE)/3rd/libsodium/Makefile: | 3rd/libsodium/autogen.sh
 libsodium: $(OBJTREE)/3rd/libsodium/Makefile
 
 $(XTUN): \
-	src/util.c \
-	src/logger.c \
-	src/daemon.c \
-	src/signal.c \
-	src/crypto.c \
-	src/packet.c \
-	src/tcp_client.c \
-	src/udp.c \
-	src/tun.c \
-	src/main.c
+	$(OBJTREE)/src/util.o \
+	$(OBJTREE)/src/logger.o \
+	$(OBJTREE)/src/daemon.o \
+	$(OBJTREE)/src/signal.o \
+	$(OBJTREE)/src/crypto.o \
+	$(OBJTREE)/src/peer.o \
+	$(OBJTREE)/src/packet.o \
+	$(OBJTREE)/src/tcp_client.o \
+	$(OBJTREE)/src/tcp_server.o \
+	$(OBJTREE)/src/udp.o \
+	$(OBJTREE)/src/tun.o \
+	$(OBJTREE)/src/main.o
 	$(LINK) $^ -o $@ $(FINAL_CFLAGS) $(LDFLAGS)
-
-$(XTUND): \
-	src/util.c \
-	src/logger.c \
-	src/daemon.c \
-	src/signal.c \
-	src/crypto.c \
-	src/peer.c \
-	src/packet.c \
-	src/tcp_server.c \
-	src/udp.c \
-	src/tun.c \
-	src/main.c
-	$(LINK) $^ -o $@ -DXTUND $(FINAL_CFLAGS) $(LDFLAGS)
 
 $(XTUN_STATIC): \
 	$(OBJTREE)/src/util.o \
@@ -169,7 +156,7 @@ clean:
 	\( -name '*.o' -o -name '*~' \
 	-o -name '*.tmp' \) -print \
 	| xargs rm -f
-	@rm -f $(XTUN) $(XTUND) $(XTUN_STATIC)
+	@rm -f $(XTUN) $(XTUN_STATIC)
 
 distclean: clean
 ifeq ($(OBJTREE)/3rd/libsodium/Makefile, $(wildcard $(OBJTREE)/3rd/libsodium/Makefile))

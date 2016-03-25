@@ -45,26 +45,26 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
         struct tundev_context *ctx = container_of(handle, struct tundev_context,
                                                   inet_udp);
 
-#ifdef XTUND
-        struct iphdr *iphdr = (struct iphdr *) m;
-        // TODO: Compare source address
-        uv_rwlock_rdlock(&rwlock);
-        struct peer *ra = lookup_peer(iphdr->saddr, peers);
-        uv_rwlock_rdunlock(&rwlock);
-        if (ra == NULL) {
-            char saddr[24] = {0}, daddr[24] = {0};
-            parse_addr(iphdr, saddr, daddr);
-            logger_log(LOG_WARNING, "Cache miss: %s -> %s", saddr, daddr);
-            uv_rwlock_wrlock(&rwlock);
-            save_peer(iphdr->saddr, (struct sockaddr *) addr, peers);
-            uv_rwlock_wrunlock(&rwlock);
+        if (mode == xTUN_SERVER) {
+            struct iphdr *iphdr = (struct iphdr *) m;
+            // TODO: Compare source address
+            uv_rwlock_rdlock(&rwlock);
+            struct peer *ra = lookup_peer(iphdr->saddr, peers);
+            uv_rwlock_rdunlock(&rwlock);
+            if (ra == NULL) {
+                char saddr[24] = {0}, daddr[24] = {0};
+                parse_addr(iphdr, saddr, daddr);
+                logger_log(LOG_WARNING, "Cache miss: %s -> %s", saddr, daddr);
+                uv_rwlock_wrlock(&rwlock);
+                save_peer(iphdr->saddr, (struct sockaddr *) addr, peers);
+                uv_rwlock_wrunlock(&rwlock);
 
-        } else {
-            if (memcmp(&ra->remote_addr, addr, sizeof(*addr))) {
-                ra->remote_addr = *addr;
+            } else {
+                if (memcmp(&ra->remote_addr, addr, sizeof(*addr))) {
+                    ra->remote_addr = *addr;
+                }
             }
         }
-#endif
 
         network_to_tun(ctx->tunfd, m, mlen);
     }
@@ -101,18 +101,18 @@ udp_start(struct tundev_context *ctx, uv_loop_t *loop) {
     uv_udp_init(loop, &ctx->inet_udp);
 
     int rc;
-    if ((rc = uv_udp_open(&ctx->inet_udp, ctx->inet_fd))) {
+    if ((rc = uv_udp_open(&ctx->inet_udp, ctx->inet_udp_fd))) {
         logger_stderr("udp open error: %s", uv_strerror(rc));
         exit(1);
     }
 
-#ifdef XTUND
-    rc = uv_udp_bind(&ctx->inet_udp, &ctx->tun->addr, UV_UDP_REUSEADDR);
-    if (rc) {
-        logger_stderr("udp bind error: %s", uv_strerror(rc));
-        exit(1);
+    if (mode == xTUN_SERVER) {
+        rc = uv_udp_bind(&ctx->inet_udp, &ctx->tun->addr, UV_UDP_REUSEADDR);
+        if (rc) {
+            logger_stderr("udp bind error: %s", uv_strerror(rc));
+            exit(1);
+        }
     }
-#endif
 
     return uv_udp_recv_start(&ctx->inet_udp, inet_alloc_cb, inet_recv_cb);
 }

@@ -66,19 +66,24 @@ struct tundev {
 uv_rwlock_t rwlock;
 struct peer *peers[HASHSIZE];
 
+int verbose;
 int protocol;
 uint8_t mode;
-int verbose;
 
 void network_to_tun(int tunfd, uint8_t *buf, ssize_t len);
-void tun_to_tcp_client(struct peer *peer, uint8_t *buf, int len);
+
 void connect_to_server(struct tundev_context *ctx);
+void tun_to_tcp_client(struct peer *peer, uint8_t *buf, int len);
 void tun_to_tcp_server(struct tundev_context *ctx, uint8_t *buf, int len);
 void tun_to_udp(struct tundev_context *ctx, uint8_t *buf, int len,
                 struct sockaddr *addr);
 
+int udp_start(struct tundev_context *ctx, uv_loop_t *loop);
 int tcp_client_start(struct tundev_context *ctx, uv_loop_t *loop);
 int tcp_server_start(struct tundev_context *ctx, uv_loop_t *loop);
-int udp_start(struct tundev_context *ctx, uv_loop_t *loop);
+
+#ifdef ANDROID
+int protect_socket(int fd);
+#endif
 
 #endif // for #ifndef TUN_H

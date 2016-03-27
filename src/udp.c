@@ -99,12 +99,25 @@ tun_to_udp(struct tundev_context *ctx, uint8_t *buf, int len,
 
 int
 udp_start(struct tundev_context *ctx, uv_loop_t *loop) {
+    int rc;
+
     uv_udp_init(loop, &ctx->inet_udp);
 
-    int rc;
-    if ((rc = uv_udp_open(&ctx->inet_udp, ctx->inet_udp_fd))) {
-        logger_stderr("udp open error: %s", uv_strerror(rc));
-        exit(1);
+    if (mode == xTUN_SERVER) {
+        if ((rc = uv_udp_open(&ctx->inet_udp, ctx->inet_udp_fd))) {
+            logger_log(LOG_ERR, "udp open error: %s", uv_strerror(rc));
+            exit(1);
+        }
+
+    } else {
+#ifdef ANDROID
+        int fd = create_socket(SOCK_DGRAM, 1);
+        if ((rc = uv_udp_open(&ctx->inet_udp, fd))) {
+            logger_log(LOG_ERR, "udp open error: %s", uv_strerror(rc));
+        } else {
+            protect_socket(fd);
+        }
+#endif
     }
 
     if (mode == xTUN_SERVER) {

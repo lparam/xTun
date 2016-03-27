@@ -32,6 +32,7 @@ close_cb(uv_handle_t *handle) {
 
 static void
 disconnect(struct tundev_context *ctx) {
+    logger_log(LOG_WARNING, "Disconnect server");
     uv_close(&ctx->inet_tcp.handle, close_cb);
 }
 
@@ -135,8 +136,20 @@ connect_cb(uv_connect_t *req, int status) {
 
 void
 connect_to_server(struct tundev_context *ctx) {
+    int rc;
+
     uv_tcp_init(ctx->timer.loop, &ctx->inet_tcp.tcp);
-    int rc = uv_tcp_connect(&ctx->connect_req, &ctx->inet_tcp.tcp,
+#ifdef ANDROID
+    int fd = create_socket(SOCK_STREAM, 1);
+    if ((rc = uv_tcp_open(&ctx->inet_tcp.tcp, fd))) {
+        logger_log(LOG_ERR, "tcp open error: %s", uv_strerror(rc));
+    } else {
+        protect_socket(fd);
+    }
+    logger_log(LOG_INFO, "Connect to server...");
+#endif
+
+    rc = uv_tcp_connect(&ctx->connect_req, &ctx->inet_tcp.tcp,
                             &ctx->tun->addr, connect_cb);
     if (rc) {
         /* TODO: start timer */

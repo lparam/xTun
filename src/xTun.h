@@ -7,9 +7,6 @@
 #define xTun_VERSION      "0.4.0"
 #define xTun_VER          "xTun/" xTun_VERSION
 
-#define xTUN_TCP        0x01
-#define xTUN_UDP        0x02
-
 struct tundev;
 
 #ifdef ANDROID

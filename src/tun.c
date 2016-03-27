@@ -1,10 +1,5 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <assert.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <linux/if.h>
@@ -33,8 +28,16 @@ struct signal_ctx {
 static void loop_close(uv_loop_t *loop);
 static void signal_cb(uv_signal_t *handle, int signum);
 static void signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data);
-uv_timer_t timer;
 
+
+#ifdef ANDROID
+int
+protect_socket(int fd) {
+    int err = protectSocket(fd);
+    logger_log(err ? LOG_INFO : LOG_ERR, "Protect socket %s", err ? "successful" : "failed");
+    return !err;
+}
+#endif
 
 void
 network_to_tun(int tunfd, uint8_t *buf, ssize_t len) {
@@ -104,7 +107,7 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
                 struct udphdr *udph = (struct udphdr *) (m + sizeof(struct iphdr));
                 if (ntohs(udph->dest) == DNS_PORT) {
                     int rc = handle_local_dns_query(ctx->tunfd, &tun->dns_server,
-                      m, mlen);
+                                                    m, mlen);
                     if (rc) {
                         return;
                     }
@@ -162,8 +165,8 @@ tun_alloc(char *iface, uint32_t parallel) {
         struct tundev_context *ctx = &tun->contexts[i];
         ctx->tun = tun;
         ctx->tunfd = fd;
-        ctx->inet_udp_fd = create_socket(SOCK_DGRAM, 1);
         if (mode == xTUN_SERVER) {
+            ctx->inet_udp_fd = create_socket(SOCK_DGRAM, 1);
             ctx->inet_tcp_fd = create_socket(SOCK_STREAM, 1);
         }
     }
@@ -246,7 +249,7 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu,
 
 	struct sockaddr_in *saddr;
 
-    saddr = (struct sockaddr_in *)&ifr.ifr_addr;
+    saddr = (struct sockaddr_in *) &ifr.ifr_addr;
     saddr->sin_family = AF_INET;
     saddr->sin_addr.s_addr = inet_addr((const char *)ipaddr);
 	if(saddr->sin_addr.s_addr == INADDR_NONE) {
@@ -320,31 +323,33 @@ tun_config(struct tundev *tun, int fd, int mtu, int prot, int global, int v,
            const char *server, int port, const char *dns)
 {
     struct sockaddr addr;
+    struct tundev_context *ctx = tun->contexts;
 
     if (resolve_addr(server, port, &addr)) {
         logger_stderr("Invalid server address");
         return 1;
     }
 
+    verbose = v;
+    protocol = prot;
+
     struct sockaddr_in dns_server;
     uv_ip4_addr(dns, DNS_PORT, &dns_server);
     tun->dns_server = *((struct sockaddr *) &dns_server);
-
-    verbose = v;
-    protocol = prot;
 
     tun->mtu = mtu;
     tun->addr = addr;
     tun->global = global;
 
-    struct tundev_context *ctx = tun->contexts;
     ctx->tunfd = fd;
+
+    if (protocol == xTUN_UDP) {
+        ctx->inet_udp_fd = create_socket(SOCK_DGRAM, 1);
+    }
+
     ctx->network_buffer = malloc(mtu + PRIMITIVE_BYTES);
     ctx->packet.buf = malloc(mtu + OVERHEAD_BYTES);
     ctx->packet.max = mtu + PRIMITIVE_BYTES;
-
-    ctx->inet_udp_fd = create_socket(SOCK_DGRAM, 1);
-    ctx->inet_tcp_fd = create_socket(SOCK_STREAM, 1);
 
     uv_async_init(uv_default_loop(), &ctx->async_handle, tun_close);
     uv_unref((uv_handle_t *) &ctx->async_handle);
@@ -366,7 +371,7 @@ tun_stop(struct tundev *tun) {
         struct tundev_context *ctx = tun->contexts;
         if (mode == xTUN_SERVER) {
             uv_close(&ctx->inet_tcp.handle, NULL);
-            uv_close((uv_handle_t *)&ctx->inet_udp, NULL);
+            uv_close((uv_handle_t *) &ctx->inet_udp, NULL);
 
         } else {
             if (protocol == xTUN_TCP) {
@@ -374,6 +379,7 @@ tun_stop(struct tundev *tun) {
                     uv_close(&ctx->inet_tcp.handle, NULL);
                 }
                 uv_close((uv_handle_t *) &ctx->timer, NULL);
+
             } else {
                 uv_close((uv_handle_t *) &ctx->inet_udp, NULL);
             }
@@ -418,8 +424,8 @@ queue_start(void *arg) {
     uv_loop_init(&loop);
     uv_async_init(&loop, &ctx->async_handle, queue_close);
 
-    tcp_server_start(ctx, &loop);
     udp_start(ctx, &loop);
+    tcp_server_start(ctx, &loop);
 
     uv_poll_init(&loop, &ctx->watcher, ctx->tunfd);
     uv_poll_start(&ctx->watcher, UV_READABLE, poll_cb);
@@ -475,40 +481,6 @@ signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data) {
     }
 }
 
-/* static void
-close_cb(uv_handle_t *handle) {
-    struct tundev_context *ctx = container_of(handle, struct tundev_context,
-                                              inet_tcp.handle);
-    connect_to_server(ctx);
-}
-
-static void
-shutdown_cb(uv_shutdown_t *req, int status) {
-    struct tundev_context *ctx = container_of(req, struct tundev_context, shutdown_req);
-    logger_log(LOG_DEBUG, "shutdown server...");
-    uv_close(&ctx->inet_tcp.handle, close_cb);
-    logger_log(LOG_DEBUG, "shutdown server done.");
-}
-
-static void
-timer_expire(uv_timer_t *handle) {
-    logger_log(LOG_DEBUG, "network switch...");
-    struct tundev_context *ctx = handle->data;
-    if (uv_is_active(&ctx->inet_tcp.handle)) {
-        logger_log(LOG_DEBUG, "server is active");
-        uv_shutdown(&ctx->shutdown_req, &ctx->inet_tcp.stream, shutdown_cb);
-    }
-    if (uv_is_closing(&ctx->inet_tcp.handle)) {
-        logger_log(LOG_DEBUG, "server is closing...");
-    }
-}
-
-static void
-network_switch(struct tundev_context *ctx) {
-    timer.data = ctx;
-    uv_timer_start(&timer, timer_expire, 5 * 1000, 5 * 1000);
-} */
-
 int
 tun_start(struct tundev *tun) {
     int i;
@@ -540,40 +512,26 @@ tun_start(struct tundev *tun) {
         struct tundev_context *ctx = tun->contexts;
 
         if (mode == xTUN_SERVER) {
-            tcp_server_start(ctx, loop);
             udp_start(ctx, loop);
+            tcp_server_start(ctx, loop);
 
         } else {
             if (protocol == xTUN_TCP) {
-                /* uv_timer_init(loop, &timer); */
-                /* network_switch(ctx); */
                 tcp_client_start(ctx, loop);
             } else {
                 udp_start(ctx, loop);
             }
         }
 
-#ifdef ANDROID
-        int err;
-        uv_os_fd_t fd = 0;
-        if (protocol == xTUN_TCP) {
-            err = uv_fileno(&ctx->inet_tcp.handle, &fd);
-        } else {
-            err = uv_fileno((uv_handle_t *) &ctx->inet_udp, &fd);
-        }
-        if (err) {
-            logger_log(LOG_ERR, "Get fileno error: %s", uv_strerror(err));
-            return 1;
-        }
-        protectSocket(fd);
-        logger_log(LOG_INFO, "xTun started.");
-#endif
-
         uv_poll_init(loop, &ctx->watcher, ctx->tunfd);
         uv_poll_start(&ctx->watcher, UV_READABLE, poll_cb);
 
 #ifndef ANDROID
         signal_install(loop, signal_cb, tun);
+#endif
+
+#ifdef ANDROID
+        logger_log(LOG_INFO, "xTun started.");
 #endif
 
         uv_run(loop, UV_RUN_DEFAULT);

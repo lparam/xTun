@@ -7,12 +7,13 @@
 
 /* MTU of VPN tunnel device. Use the following formula to calculate:
    1492 (Ethernet) - 20 (IPv4, or 40 for IPv6) - 8 (UDP) - 24 (xTun) */
-// #define MTU 1440
+/* #define MTU 1440 */
 
 /* MTU of VPN tunnel device. Use the following formula to calculate:
    1492 (Ethernet) - 20 (IPv4, or 40 for IPv6) - 20 (TCP) - 26 (xTun) */
 #define MTU 1426
 
+#define HASHSIZE 256
 
 #define DISCONNECTED   0
 #define CONNECTING     1
@@ -22,17 +23,17 @@
 
 #define xTUN_CLIENT		0x01
 #define xTUN_SERVER     0x02
-#define xTUN_TCP        0x04
-#define xTUN_UDP        0x08
+#define xTUN_TCP        0x01
+#define xTUN_UDP        0x02
 
 struct tundev_context {
 	int             tunfd;
     int             inet_tcp_fd;
     int             inet_udp_fd;
-    int             connect; /* TCP client */
+    int             connect;        /* TCP client */
     int             interval;
     uint8_t        *network_buffer; /* UDP */
-    struct          packet packet;  /* TCP */
+    struct          packet packet;  /* TCP client */
     union {
         uv_tcp_t tcp;
         uv_handle_t handle;
@@ -40,6 +41,7 @@ struct tundev_context {
     } inet_tcp;
     uv_udp_t        inet_udp;
     uv_connect_t    connect_req;
+    uv_shutdown_t   shutdown_req;
     uv_poll_t       watcher;
     uv_sem_t        semaphore;
     uv_async_t      async_handle;
@@ -61,10 +63,8 @@ struct tundev {
     struct tundev_context  contexts[0];
 };
 
-#define HASHSIZE 256
-
-struct peer *peers[HASHSIZE];
 uv_rwlock_t rwlock;
+struct peer *peers[HASHSIZE];
 
 int protocol;
 uint8_t mode;

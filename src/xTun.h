@@ -7,11 +7,14 @@
 #define xTun_VERSION      "0.4.0"
 #define xTun_VER          "xTun/" xTun_VERSION
 
+#define xTUN_TCP        0x01
+#define xTUN_UDP        0x02
+
 struct tundev;
 
 #ifdef ANDROID
 struct tundev * tun_alloc(void);
-int tun_config(struct tundev *tun, int fd, int mtu, int global,
+int tun_config(struct tundev *tun, int fd, int mtu, int protocol, int global,
                int verbose, const char *server, int port, const char *dns);
 #else
 struct tundev * tun_alloc(char *iface, uint32_t queues);

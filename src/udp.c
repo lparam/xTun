@@ -38,7 +38,7 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
 
         int rc = crypto_decrypt(m, (uint8_t *)buf->base, nread);
         if (rc) {
-            logger_log(LOG_ERR, "Invalid packet");
+            logger_log(LOG_ERR, "Invalid udp packet");
             return;
         }
 
@@ -49,21 +49,22 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
             struct iphdr *iphdr = (struct iphdr *) m;
             // TODO: Compare source address
             uv_rwlock_rdlock(&rwlock);
-            struct peer *ra = lookup_peer(iphdr->saddr, peers);
+            struct peer *peer = lookup_peer(iphdr->saddr, peers);
             uv_rwlock_rdunlock(&rwlock);
-            if (ra == NULL) {
+            if (peer == NULL) {
                 char saddr[24] = {0}, daddr[24] = {0};
                 parse_addr(iphdr, saddr, daddr);
-                logger_log(LOG_WARNING, "Cache miss: %s -> %s", saddr, daddr);
+                logger_log(LOG_WARNING, "[UDP] Cache miss: %s -> %s", saddr, daddr);
                 uv_rwlock_wrlock(&rwlock);
-                save_peer(iphdr->saddr, (struct sockaddr *) addr, peers);
+                peer = save_peer(iphdr->saddr, (struct sockaddr *) addr, peers);
                 uv_rwlock_wrunlock(&rwlock);
 
             } else {
-                if (memcmp(&ra->remote_addr, addr, sizeof(*addr))) {
-                    ra->remote_addr = *addr;
+                if (memcmp(&peer->remote_addr, addr, sizeof(*addr))) {
+                    peer->remote_addr = *addr;
                 }
             }
+            peer->protocol = xTUN_UDP;
         }
 
         network_to_tun(ctx->tunfd, m, mlen);

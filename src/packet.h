@@ -17,6 +17,7 @@ struct packet {
     int read;
     uint16_t offset;
     uint16_t size;
+    uint16_t max;
     uint8_t *buf;
 };
 

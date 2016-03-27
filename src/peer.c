@@ -46,7 +46,7 @@ save_peer(uint32_t tun_addr, struct sockaddr *remote_addr, struct peer **peers)
 }
 
 void
-clear_peers(struct peer **peers) {
+destroy_peers(struct peer **peers) {
 	for (int i = 0; i < HASHSIZE; i++) {
         struct peer *p = peers[i];
         while (p) {
@@ -59,5 +59,8 @@ clear_peers(struct peer **peers) {
 }
 
 void
-peer_init() {
+init_peers(struct peer **peers) {
+    for (int i = 0; i < HASHSIZE; i++) {
+        peers[i] = NULL;
+    }
 }

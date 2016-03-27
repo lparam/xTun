@@ -1,4 +1,5 @@
 #include <string.h>
+#include <assert.h>
 
 #include "uv.h"
 
@@ -22,33 +23,34 @@ struct client_context {
 
 
 static struct client_context *
-new_client(int packet_size) {
+new_client(int mtu) {
     struct client_context *client = malloc(sizeof(*client));
     memset(client, 0, sizeof(*client));
-    client->packet.buf = malloc(packet_size);
+    client->packet.buf = malloc(mtu + OVERHEAD_BYTES);
     packet_reset(&client->packet);
+    client->packet.max = mtu + PRIMITIVE_BYTES;
     return client;
 }
 
 static void
 free_client(struct client_context *client) {
-    if (client->peer) {
-        client->peer->tcp = 0;
-        client->peer->data = NULL;
-    }
     free(client->packet.buf);
     free(client);
 }
 
 static void
 client_close_cb(uv_handle_t *handle) {
-    struct client_context *client = (struct client_context *) handle->data;
+    struct client_context *client = container_of(handle, struct client_context,
+                                                 handle);
     free_client(client);
 }
 
 static void
 close_client(struct client_context *client) {
-    client->handle.handle.data = client;
+    if (client->peer) {
+        client->peer->data = NULL;
+        client->peer = NULL;
+    }
     uv_close(&client->handle.handle, client_close_cb);
 }
 
@@ -68,19 +70,10 @@ alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
 
 static void
 send_cb(uv_write_t *req, int status) {
-    struct client_context *client = req->data;
-    if (status) {
-        if (client->peer) {
-            char *a = inet_ntoa(client->peer->tun_addr);
-            logger_log(LOG_ERR, "Send to %s failed: %s", a,
-              uv_strerror(status));
-        } else {
-            logger_log(LOG_ERR, "Send to client failed: %s",
-              uv_strerror(status));
-        }
-    }
-    uv_buf_t *buf = (uv_buf_t *) (req + 1);
-    free(buf->base);
+    uv_buf_t *buf1 = (uv_buf_t *) (req + 1);
+    uv_buf_t *buf2 = buf1 + 1;
+    free(buf1->base);
+    free(buf2->base);
     free(req);
 }
 
@@ -114,7 +107,8 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
             if (peer == NULL) {
                 char saddr[24] = {0}, daddr[24] = {0};
                 parse_addr(iphdr, saddr, daddr);
-                logger_log(LOG_WARNING, "Cache miss: %s -> %s", saddr, daddr);
+                /* check source address is the same network */
+                logger_log(LOG_WARNING, "[TCP] Cache miss: %s -> %s", saddr, daddr);
 
                 struct sockaddr addr;
                 int len = sizeof(addr);
@@ -123,9 +117,15 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
                 uv_rwlock_wrlock(&rwlock);
                 peer = save_peer(iphdr->saddr, &addr, peers);
                 uv_rwlock_wrunlock(&rwlock);
+
+            } else {
+                if (peer->data) {
+                    struct client_context *old = peer->data;
+                    close_client(old);
+                }
             }
 
-            peer->tcp = 1;
+            peer->protocol= xTUN_TCP;
             peer->data = client;
             client->peer = peer;
         }
@@ -200,22 +200,27 @@ void
 tun_to_tcp_client(struct peer *peer, uint8_t *buf, int len) {
     struct client_context *client = peer->data;
     if (client) {
-        uv_write_t *req = malloc(sizeof(*req) + sizeof(uv_buf_t));
-
-        uv_buf_t *outbuf = (uv_buf_t *) (req + 1);
-        outbuf->base = (char *) buf;
-        outbuf->len = len;
-
-        uint8_t hdr[2];
+        uint8_t *hdr = malloc(HEADER_BYTES);
         write_size(hdr, len);
 
+        uv_write_t *req = malloc(sizeof(*req) + sizeof(uv_buf_t) * 2);
+
+        uv_buf_t *outbuf1 = (uv_buf_t *) (req + 1);
+        uv_buf_t *outbuf2 = outbuf1 + 1;
+        *outbuf1 = uv_buf_init((char *) hdr, HEADER_BYTES);
+        *outbuf2 = uv_buf_init((char *) buf, len);
+
         uv_buf_t bufs[2] = {
-            uv_buf_init((char *) hdr, 2),
-            *outbuf,
+            *outbuf1,
+            *outbuf2,
         };
 
         req->data = client;
-        uv_write(req, &client->handle.stream, bufs, 2, send_cb);
+        int rc = uv_write(req, &client->handle.stream, bufs, 2, send_cb);
+        if (rc) {
+            logger_log(LOG_ERR, "TCP Write error: %s", uv_strerror(rc));
+            free(buf);
+        }
 
     } else {
         free(buf);

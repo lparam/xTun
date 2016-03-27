@@ -33,6 +33,7 @@ struct signal_ctx {
 static void loop_close(uv_loop_t *loop);
 static void signal_cb(uv_signal_t *handle, int signum);
 static void signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data);
+uv_timer_t timer;
 
 
 void
@@ -67,6 +68,7 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
 
     int mlen = read(ctx->tunfd, m, tun->mtu);
     if (mlen <= 0) {
+        logger_log(LOG_ERR, "tun read error");
         free(tunbuf);
         return;
     }
@@ -77,18 +79,19 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
         struct peer *peer = lookup_peer(iphdr->daddr, peers);
         uv_rwlock_rdunlock(&rwlock);
         if (peer) {
-            if (peer->tcp) {
-                crypto_encrypt(tunbuf, m, mlen);
+            crypto_encrypt(tunbuf, m, mlen);
+            if (peer->protocol == xTUN_TCP) {
                 tun_to_tcp_client(peer, tunbuf, PRIMITIVE_BYTES + mlen);
             } else {
-                crypto_encrypt(tunbuf, m, mlen);
-                tun_to_udp(ctx, tunbuf, PRIMITIVE_BYTES + mlen, &peer->remote_addr);
+                tun_to_udp(ctx, tunbuf, PRIMITIVE_BYTES + mlen,
+                           &peer->remote_addr);
             }
 
         } else {
             char saddr[24] = {0}, daddr[24] = {0};
             parse_addr(iphdr, saddr, daddr);
-            logger_log(LOG_ERR, "Destination address miss: %s -> %s", saddr, daddr);
+            logger_log(LOG_ERR, "Destination address miss: %s -> %s",
+                       saddr, daddr);
             free(tunbuf);
         }
 
@@ -282,7 +285,8 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu,
     for (int i = 0; i < tun->queues; i++) {
         struct tundev_context *ctx = &tun->contexts[i];
         ctx->network_buffer = malloc(mtu + PRIMITIVE_BYTES);
-        ctx->packet.buf = malloc(ctx->tun->mtu);
+        ctx->packet.buf = malloc(mtu + OVERHEAD_BYTES);
+        ctx->packet.max = mtu + PRIMITIVE_BYTES;
     }
 }
 #else
@@ -296,9 +300,7 @@ tun_close(uv_async_t *handle) {
     uv_close((uv_handle_t *) &ctx->async_handle, NULL);
 
     if (protocol == xTUN_TCP) {
-        if (uv_is_active(&ctx->inet_tcp.handle)) {
-            uv_close(&ctx->inet_tcp.handle, NULL);
-        }
+        uv_close(&ctx->inet_tcp.handle, NULL);
         uv_close((uv_handle_t *) &ctx->timer, NULL);
     } else {
         uv_close((uv_handle_t *) &ctx->inet_udp, NULL);
@@ -314,7 +316,7 @@ tun_close(uv_async_t *handle) {
 }
 
 int
-tun_config(struct tundev *tun, int fd, int mtu, int global, int v,
+tun_config(struct tundev *tun, int fd, int mtu, int prot, int global, int v,
            const char *server, int port, const char *dns)
 {
     struct sockaddr addr;
@@ -329,6 +331,7 @@ tun_config(struct tundev *tun, int fd, int mtu, int global, int v,
     tun->dns_server = *((struct sockaddr *) &dns_server);
 
     verbose = v;
+    protocol = prot;
 
     tun->mtu = mtu;
     tun->addr = addr;
@@ -337,6 +340,11 @@ tun_config(struct tundev *tun, int fd, int mtu, int global, int v,
     struct tundev_context *ctx = tun->contexts;
     ctx->tunfd = fd;
     ctx->network_buffer = malloc(mtu + PRIMITIVE_BYTES);
+    ctx->packet.buf = malloc(mtu + OVERHEAD_BYTES);
+    ctx->packet.max = mtu + PRIMITIVE_BYTES;
+
+    ctx->inet_udp_fd = create_socket(SOCK_DGRAM, 1);
+    ctx->inet_tcp_fd = create_socket(SOCK_STREAM, 1);
 
     uv_async_init(uv_default_loop(), &ctx->async_handle, tun_close);
     uv_unref((uv_handle_t *) &ctx->async_handle);
@@ -467,6 +475,40 @@ signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data) {
     }
 }
 
+/* static void
+close_cb(uv_handle_t *handle) {
+    struct tundev_context *ctx = container_of(handle, struct tundev_context,
+                                              inet_tcp.handle);
+    connect_to_server(ctx);
+}
+
+static void
+shutdown_cb(uv_shutdown_t *req, int status) {
+    struct tundev_context *ctx = container_of(req, struct tundev_context, shutdown_req);
+    logger_log(LOG_DEBUG, "shutdown server...");
+    uv_close(&ctx->inet_tcp.handle, close_cb);
+    logger_log(LOG_DEBUG, "shutdown server done.");
+}
+
+static void
+timer_expire(uv_timer_t *handle) {
+    logger_log(LOG_DEBUG, "network switch...");
+    struct tundev_context *ctx = handle->data;
+    if (uv_is_active(&ctx->inet_tcp.handle)) {
+        logger_log(LOG_DEBUG, "server is active");
+        uv_shutdown(&ctx->shutdown_req, &ctx->inet_tcp.stream, shutdown_cb);
+    }
+    if (uv_is_closing(&ctx->inet_tcp.handle)) {
+        logger_log(LOG_DEBUG, "server is closing...");
+    }
+}
+
+static void
+network_switch(struct tundev_context *ctx) {
+    timer.data = ctx;
+    uv_timer_start(&timer, timer_expire, 5 * 1000, 5 * 1000);
+} */
+
 int
 tun_start(struct tundev *tun) {
     int i;
@@ -474,9 +516,7 @@ tun_start(struct tundev *tun) {
 
     if (mode == xTUN_SERVER) {
         uv_rwlock_init(&rwlock);
-        for (i = 0; i < HASHSIZE; i++) {
-            peers[i] = NULL;
-        }
+        init_peers(peers);
     }
 
     if (tun->queues > 1) {
@@ -499,21 +539,25 @@ tun_start(struct tundev *tun) {
     } else {
         struct tundev_context *ctx = tun->contexts;
 
-    if (mode == xTUN_SERVER) {
-        tcp_server_start(ctx, loop);
-        udp_start(ctx, loop);
-    } else {
-        if (protocol == xTUN_TCP) {
-            tcp_client_start(ctx, loop);
-        } else {
+        if (mode == xTUN_SERVER) {
+            tcp_server_start(ctx, loop);
             udp_start(ctx, loop);
+
+        } else {
+            if (protocol == xTUN_TCP) {
+                /* uv_timer_init(loop, &timer); */
+                /* network_switch(ctx); */
+                tcp_client_start(ctx, loop);
+            } else {
+                udp_start(ctx, loop);
+            }
         }
-    }
 
 #ifdef ANDROID
+        int err;
         uv_os_fd_t fd = 0;
         if (protocol == xTUN_TCP) {
-            err = uv_fileno(&ctx->inet_udp.handle, &fd);
+            err = uv_fileno(&ctx->inet_tcp.handle, &fd);
         } else {
             err = uv_fileno((uv_handle_t *) &ctx->inet_udp, &fd);
         }
@@ -536,7 +580,7 @@ tun_start(struct tundev *tun) {
 
         if (mode == xTUN_SERVER) {
             uv_rwlock_destroy(&rwlock);
-            clear_peers(peers);
+            destroy_peers(peers);
         }
 
         loop_close(loop);

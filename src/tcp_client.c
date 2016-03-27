@@ -1,3 +1,4 @@
+#include "assert.h"
 #include "uv.h"
 
 #include "crypto.h"
@@ -23,6 +24,18 @@ reconnect(struct tundev_context *ctx) {
 }
 
 static void
+close_cb(uv_handle_t *handle) {
+    struct tundev_context *ctx = container_of(handle, struct tundev_context,
+                                              inet_tcp.handle);
+    ctx->connect = DISCONNECTED;
+}
+
+static void
+disconnect(struct tundev_context *ctx) {
+    uv_close(&ctx->inet_tcp.handle, close_cb);
+}
+
+static void
 alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
     struct tundev_context *ctx = container_of(handle, struct tundev_context,
                                               inet_tcp.handle);
@@ -39,13 +52,14 @@ alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
 static void
 send_cb(uv_write_t *req, int status) {
     if (status) {
-        /* TODO: reconnect to server */
+        /* struct tundev_context *ctx = req->data; */
+        /* ctx->connect = DISCONNECTED; */
         logger_log(LOG_ERR, "Send to server failed: %s", uv_strerror(status));
-        struct tundev_context *ctx = req->data;
-        ctx->connect = DISCONNECTED;
     }
-    uv_buf_t *buf = (uv_buf_t *) (req + 1);
-    free(buf->base);
+    uv_buf_t *buf1 = (uv_buf_t *) (req + 1);
+    uv_buf_t *buf2 = buf1 + 1;
+    free(buf1->base);
+    free(buf2->base);
     free(req);
 }
 
@@ -77,17 +91,21 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         packet_reset(packet);
 
     } else if (nread < 0) {
-        ctx->connect = DISCONNECTED;
         if (nread != UV_EOF) {
             logger_log(LOG_ERR, "Receive from server failed: %s",
                        uv_strerror(nread));
+        } else {
+            logger_log(LOG_WARNING, "Disconnected by server");
         }
+        disconnect(ctx);
     }
 
     return;
 
 err:
     logger_log(LOG_ERR, "Invalid tcp packet");
+    uv_read_stop(stream);
+    disconnect(ctx);
 }
 
 static void
@@ -117,13 +135,14 @@ connect_cb(uv_connect_t *req, int status) {
 
 void
 connect_to_server(struct tundev_context *ctx) {
-    ctx->connect = CONNECTING;
     uv_tcp_init(ctx->timer.loop, &ctx->inet_tcp.tcp);
     int rc = uv_tcp_connect(&ctx->connect_req, &ctx->inet_tcp.tcp,
                             &ctx->tun->addr, connect_cb);
     if (rc) {
+        /* TODO: start timer */
         logger_log(LOG_ERR, "Connect to server error: %s", uv_strerror(rc));
-        exit(1);
+    } else {
+        ctx->connect = CONNECTING;
     }
 }
 
@@ -137,20 +156,25 @@ tcp_client_start(struct tundev_context *ctx, uv_loop_t *loop) {
 
 void
 tun_to_tcp_server(struct tundev_context *ctx, uint8_t *buf, int len) {
-    uv_write_t *req = malloc(sizeof(*req) + sizeof(uv_buf_t));
-
-    uv_buf_t *outbuf = (uv_buf_t *) (req + 1);
-    outbuf->base = (char *) buf;
-    outbuf->len = len;
-
-    uint8_t hdr[2];
+    uint8_t *hdr = malloc(HEADER_BYTES);
     write_size(hdr, len);
 
+    uv_write_t *req = malloc(sizeof(*req) + sizeof(uv_buf_t) * 2);
+
+    uv_buf_t *outbuf1 = (uv_buf_t *) (req + 1);
+    uv_buf_t *outbuf2 = outbuf1 + 1;
+    *outbuf1 = uv_buf_init((char *) hdr, HEADER_BYTES);
+    *outbuf2 = uv_buf_init((char *) buf, len);
+
     uv_buf_t bufs[2] = {
-        uv_buf_init((char *) hdr, 2),
-        *outbuf,
+        *outbuf1,
+        *outbuf2,
     };
 
     req->data = ctx;
-    uv_write(req, &ctx->inet_tcp.stream, bufs, 2, send_cb);
+    int rc = uv_write(req, &ctx->inet_tcp.stream, bufs, 2, send_cb);
+    if (rc) {
+        logger_log(LOG_ERR, "TCP Write error: %s", uv_strerror(rc));
+        free(buf);
+    }
 }

@@ -147,6 +147,11 @@ $(XTUN_STATIC): \
 	$(OBJTREE)/src/crypto.o \
 	$(OBJTREE)/src/checksum.o \
 	$(OBJTREE)/src/android.o \
+	$(OBJTREE)/src/peer.o \
+	$(OBJTREE)/src/packet.o \
+	$(OBJTREE)/src/tcp_client.o \
+	$(OBJTREE)/src/tcp_server.o \
+	$(OBJTREE)/src/udp.o \
 	$(OBJTREE)/src/tun.o
 	$(BUILD_AR) rcu $@ $^
 	$(BUILD_RANLIB) $@

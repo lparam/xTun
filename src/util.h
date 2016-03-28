@@ -19,5 +19,7 @@ pid_t gettid();
 int read_size(uint8_t *buffer);
 void write_size(uint8_t *buffer, int len);
 void parse_addr(struct iphdr *iphdr, char *saddr, char *daddr);
+void print_rss();
+int replace_allocator();
 
 #endif // for #ifndef UTIL_H

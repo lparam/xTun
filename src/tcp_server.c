@@ -65,29 +65,15 @@ static void
 alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
     struct client_context *client = container_of(handle, struct client_context,
                                                  handle);
-    struct packet *packet = &client->packet;
-    if (packet->size) {
-        buf->base = (char *) packet->buf + packet->offset;
-        buf->len = packet->size - packet->offset;
-    } else {
-        buf->base = (char *) packet->buf + (packet->read ? 1 : 0);
-        buf->len = packet->read ? 1 : HEADER_BYTES;
-    }
-}
-
-static void
-send_cb(uv_write_t *req, int status) {
-    uv_buf_t *buf1 = (uv_buf_t *) (req + 1);
-    uv_buf_t *buf2 = buf1 + 1;
-    free(buf1->base);
-    free(buf2->base);
-    free(req);
+    packet_alloc(&client->packet, buf);
 }
 
 static void
 recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     struct client_context *client = container_of(stream, struct client_context,
                                                  handle.stream);
+    struct tundev_context *ctx = stream->data;
+
     if (nread > 0) {
         struct packet *packet = &client->packet;
         int rc = packet_filter(packet, buf->base, nread);
@@ -137,21 +123,14 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
             client->peer = peer;
         }
 
-        struct tundev_context *ctx = stream->data;
         network_to_tun(ctx->tunfd, m, mlen);
 
         packet_reset(packet);
 
     } else if (nread < 0) {
         if (nread != UV_EOF) {
-            if (client->peer) {
-                char *a = inet_ntoa(client->peer->tun_addr);
-                logger_log(LOG_ERR, "Receive from %s failed: %s", a,
-                           uv_strerror(nread));
-            } else {
-                logger_log(LOG_ERR, "Receive from client failed: %s",
-                           uv_strerror(nread));
-            }
+            logger_log(LOG_ERR, "Receive from client failed: %s",
+                       uv_strerror(nread));
         }
         close_client(client);
     }
@@ -181,9 +160,11 @@ accept_cb(uv_stream_t *stream, int status) {
 
 int
 tcp_server_start(struct tundev_context *ctx, uv_loop_t *loop) {
+    int rc;
+
     uv_tcp_init(loop, &ctx->inet_tcp.tcp);
 
-    int rc;
+    ctx->inet_tcp_fd = create_socket(SOCK_STREAM, 1);
     if ((rc = uv_tcp_open(&ctx->inet_tcp.tcp, ctx->inet_tcp_fd))) {
         logger_stderr("tcp open error: %s", uv_strerror(rc));
         exit(1);
@@ -194,6 +175,10 @@ tcp_server_start(struct tundev_context *ctx, uv_loop_t *loop) {
         logger_stderr("tcp bind error: %s", uv_strerror(rc));
         exit(1);
     }
+
+    rc = uv_tcp_nodelay(&ctx->inet_tcp.tcp, 1);
+    rc = uv_tcp_keepalive(&ctx->inet_tcp.tcp, 1, 60);
+
     ctx->inet_tcp.tcp.data = ctx;
     rc = uv_listen(&ctx->inet_tcp.stream, 128, accept_cb);
     if (rc) {
@@ -207,29 +192,6 @@ void
 tun_to_tcp_client(struct peer *peer, uint8_t *buf, int len) {
     struct client_context *client = peer->data;
     if (client) {
-        uint8_t *hdr = malloc(HEADER_BYTES);
-        write_size(hdr, len);
-
-        uv_write_t *req = malloc(sizeof(*req) + sizeof(uv_buf_t) * 2);
-
-        uv_buf_t *outbuf1 = (uv_buf_t *) (req + 1);
-        uv_buf_t *outbuf2 = outbuf1 + 1;
-        *outbuf1 = uv_buf_init((char *) hdr, HEADER_BYTES);
-        *outbuf2 = uv_buf_init((char *) buf, len);
-
-        uv_buf_t bufs[2] = {
-            *outbuf1,
-            *outbuf2,
-        };
-
-        req->data = client;
-        int rc = uv_write(req, &client->handle.stream, bufs, 2, send_cb);
-        if (rc) {
-            logger_log(LOG_ERR, "TCP Write error: %s", uv_strerror(rc));
-            free(buf);
-        }
-
-    } else {
-        free(buf);
+        tun_to_tcp(buf, len, &client->handle.stream);
     }
 }

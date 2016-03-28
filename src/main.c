@@ -20,7 +20,7 @@ static int mtu = MTU;
 static int port = 1082;
 static int daemon_mode = 1;
 static uint32_t parallel = 1;
-static char *iface;
+static char *iface = "tun0";
 static char *ifconf;
 static char *addrbuf;
 static char *pidfile = "/var/run/xTun.pid";
@@ -56,16 +56,17 @@ print_usage(const char *prog) {
     printf("xTun Version: %s Maintained by lparam\n", xTun_VER);
     printf("Usage:\n  %s [options]\n", prog);
     printf("Options:\n");
-    puts("  -i <iface>\t\t interface name (e.g. tun0)\n"
+    puts(""
          "  -I <ifconf>\t\t IP address of interface (e.g. 10.3.0.1/16)\n"
          "  -m <mode>\t\t client or server\n"
          "  -k <encryption_key>\t shared password for data encryption\n"
          "  -s <server address>\t server address:port (only available in client mode)\n"
-         "  [-t]\t\t tcp mode\n"
-         "  [-b <bind address>]\t bind address:port (only available in server mode, default: 0.0.0.0:1082)\n"
+         "  [-i <iface>]\t\t interface name (default: tun0)\n"
+         "  [-t]\t\t\t tcp mode (only available on client mode)\n"
+         "  [-b <bind address>]\t bind address:port (only available on server mode, default: 0.0.0.0:1082)\n"
          "  [-p <pid_file>]\t PID file of daemon (default: /var/run/xTun.pid)\n"
-         "  [-P <parallel>]\t number of parallel instance to run\n"
-         "  [--mtu <mtu>]\t\t MTU size (default: 1440)\n"
+         "  [-P <parallel>]\t number of parallel instance to run (only available on server mode)\n"
+         "  [--mtu <mtu>]\t\t MTU size (default: 1426)\n"
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
          "  [-n]\t\t\t non daemon mode\n"
          "  [-h, --help]\t\t this help\n"
@@ -198,10 +199,6 @@ main(int argc, char *argv[]) {
 
     protocol = protocol ? protocol : xTUN_UDP;
 
-    if (protocol == xTUN_TCP && mode == xTUN_CLIENT) {
-        parallel = 1;
-    }
-
     if (daemon_mode) {
         if (daemonize()) {
             return 1;
@@ -215,7 +212,6 @@ main(int argc, char *argv[]) {
     init();
 
     struct sockaddr addr;
-
     int rc = resolve_addr(addrbuf, port, &addr);
     if (rc) {
         logger_stderr("invalid address");

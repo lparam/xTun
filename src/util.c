@@ -19,10 +19,6 @@
 #include "logger.h"
 
 
-#if defined(_WIN32)
-#define strdup _strdup
-#endif
-
 #define MAX_LINE_LENGTH_BYTES (64)
 #define DEFAULT_LINE_LENGTH_BYTES (16)
 
@@ -101,7 +97,14 @@ dump_hex(const void *data, uint32_t len, char *title) {
     print_buffer(data, len, 1, 16);
 }
 
-/* TODO: direct put port */
+
+void
+print_rss() {
+    size_t rss;
+    uv_resident_set_memory(&rss);
+    logger_log(LOG_DEBUG, "resident set memory: %llu", (unsigned long long) rss);
+}
+
 int
 resolve_addr(const char *buf, int port, struct sockaddr *addr) {
     int rc = 0;
@@ -126,7 +129,7 @@ resolve_addr(const char *buf, int port, struct sockaddr *addr) {
             hints.ai_socktype = SOCK_STREAM;
             rc = 0;
 
-            char service[6];
+            char service[6] = {0};
             snprintf(service, 6, "%d", port);
             int err = getaddrinfo(buf, service, &hints, &result);
             if (err != 0) {
@@ -153,7 +156,7 @@ resolve_addr(const char *buf, int port, struct sockaddr *addr) {
             }
 
             if (rp == NULL) {
-                logger_stderr("Failed to resolve address: %s", buf);
+                logger_stderr("resolve address failed: %s", buf);
                 rc = 1;
             }
 
@@ -161,7 +164,7 @@ resolve_addr(const char *buf, int port, struct sockaddr *addr) {
             goto err;
 
         } else {
-            *addr = *(struct sockaddr*)&addr4;
+            *addr = *(struct sockaddr *) &addr4;
         }
 
     } else {
@@ -177,11 +180,11 @@ int
 ip_name(const struct sockaddr *ip, char *name, size_t size) {
     int port = -1;
     if (ip->sa_family == AF_INET) {
-        uv_ip4_name((const struct sockaddr_in*)ip, name, size);
-        port = ntohs(((const struct sockaddr_in*)ip)->sin_port);
+        uv_ip4_name((const struct sockaddr_in *) ip, name, size);
+        port = ntohs(((const struct sockaddr_in *) ip)->sin_port);
     } else if (ip->sa_family == AF_INET6) {
-        uv_ip6_name((const struct sockaddr_in6*)ip, name, size);
-        port = ntohs(((const struct sockaddr_in6*)ip)->sin6_port);
+        uv_ip6_name((const struct sockaddr_in6 *) ip, name, size);
+        port = ntohs(((const struct sockaddr_in6 *) ip)->sin6_port);
     }
     return port;
 }
@@ -229,4 +232,32 @@ parse_addr(struct iphdr *iphdr, char *saddr, char *daddr) {
     strcpy(saddr, a);
     a = inet_ntoa(*(struct in_addr *) &iphdr->daddr);
     strcpy(daddr, a);
+}
+
+static void *
+uv_malloc(size_t size) {
+    logger_log(LOG_DEBUG, "malloc %ld", size);
+    return malloc(size);
+}
+
+static void *
+uv_realloc(void *ptr, size_t size) {
+    logger_log(LOG_DEBUG, "realloc %p %ld", ptr, size);
+    return realloc(ptr, size);
+}
+
+static void *
+uv_callc(size_t count, size_t size) {
+    logger_log(LOG_DEBUG, "calloc %ld", size);
+    return calloc(count, size);
+}
+
+static void
+uv_free(void *ptr) {
+    logger_log(LOG_DEBUG, "free %p", ptr);
+    free(ptr);
+}
+
+int replace_allocator() {
+    return uv_replace_allocator(uv_malloc, uv_realloc, uv_callc, uv_free);
 }

@@ -6,6 +6,9 @@
 #include "packet.h"
 #include "util.h"
 #include "tun.h"
+#ifdef ANDROID
+#include "android.h"
+#endif
 
 
 static void
@@ -32,7 +35,6 @@ close_cb(uv_handle_t *handle) {
 
 static void
 disconnect(struct tundev_context *ctx) {
-    logger_log(LOG_WARNING, "Disconnect server");
     uv_close(&ctx->inet_tcp.handle, close_cb);
 }
 
@@ -40,28 +42,7 @@ static void
 alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
     struct tundev_context *ctx = container_of(handle, struct tundev_context,
                                               inet_tcp.handle);
-    struct packet *packet = &ctx->packet;
-    if (packet->size) {
-        buf->base = (char *) packet->buf + packet->offset;
-        buf->len = packet->size - packet->offset;
-    } else {
-        buf->base = (char *) packet->buf + (packet->read ? 1 : 0);
-        buf->len = packet->read ? 1 : HEADER_BYTES;
-    }
-}
-
-static void
-send_cb(uv_write_t *req, int status) {
-    if (status) {
-        /* struct tundev_context *ctx = req->data; */
-        /* ctx->connect = DISCONNECTED; */
-        logger_log(LOG_ERR, "Send to server failed: %s", uv_strerror(status));
-    }
-    uv_buf_t *buf1 = (uv_buf_t *) (req + 1);
-    uv_buf_t *buf2 = buf1 + 1;
-    free(buf1->base);
-    free(buf2->base);
-    free(req);
+    packet_alloc(&ctx->packet, buf);
 }
 
 static void
@@ -95,8 +76,6 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         if (nread != UV_EOF) {
             logger_log(LOG_ERR, "Receive from server failed: %s",
                        uv_strerror(nread));
-        } else {
-            logger_log(LOG_WARNING, "Disconnected by server");
         }
         disconnect(ctx);
     }
@@ -105,7 +84,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 
 err:
     logger_log(LOG_ERR, "Invalid tcp packet");
-    uv_read_stop(stream);
+    /* uv_read_stop(stream); */
     disconnect(ctx);
 }
 
@@ -139,18 +118,25 @@ connect_to_server(struct tundev_context *ctx) {
     int rc;
 
     uv_tcp_init(ctx->timer.loop, &ctx->inet_tcp.tcp);
-#ifdef ANDROID
-    int fd = create_socket(SOCK_STREAM, 1);
-    if ((rc = uv_tcp_open(&ctx->inet_tcp.tcp, fd))) {
+
+    ctx->inet_tcp_fd = create_socket(SOCK_STREAM, 0);
+    if ((rc = uv_tcp_open(&ctx->inet_tcp.tcp, ctx->inet_tcp_fd))) {
         logger_log(LOG_ERR, "tcp open error: %s", uv_strerror(rc));
-    } else {
-        protect_socket(fd);
+        exit(1);
     }
+
+#ifdef ANDROID
+    rc = protectSocket(ctx->inet_tcp_fd);
+    logger_log(rc ? LOG_INFO : LOG_ERR, "Protect socket %s",
+               rc ? "successful" : "failed");
     logger_log(LOG_INFO, "Connect to server...");
 #endif
 
-    rc = uv_tcp_connect(&ctx->connect_req, &ctx->inet_tcp.tcp,
-                            &ctx->tun->addr, connect_cb);
+    rc = uv_tcp_nodelay(&ctx->inet_tcp.tcp, 1);
+    rc = uv_tcp_keepalive(&ctx->inet_tcp.tcp, 1, 60);
+
+    rc = uv_tcp_connect(&ctx->connect_req, &ctx->inet_tcp.tcp, &ctx->tun->addr,
+                        connect_cb);
     if (rc) {
         /* TODO: start timer */
         logger_log(LOG_ERR, "Connect to server error: %s", uv_strerror(rc));
@@ -162,6 +148,8 @@ connect_to_server(struct tundev_context *ctx) {
 int
 tcp_client_start(struct tundev_context *ctx, uv_loop_t *loop) {
     ctx->interval = 5;
+    ctx->packet.buf = malloc(ctx->tun->mtu + OVERHEAD_BYTES);
+    ctx->packet.max = ctx->tun->mtu + PRIMITIVE_BYTES;
     uv_timer_init(loop, &ctx->timer);
     connect_to_server(ctx);
     return 0;
@@ -169,25 +157,5 @@ tcp_client_start(struct tundev_context *ctx, uv_loop_t *loop) {
 
 void
 tun_to_tcp_server(struct tundev_context *ctx, uint8_t *buf, int len) {
-    uint8_t *hdr = malloc(HEADER_BYTES);
-    write_size(hdr, len);
-
-    uv_write_t *req = malloc(sizeof(*req) + sizeof(uv_buf_t) * 2);
-
-    uv_buf_t *outbuf1 = (uv_buf_t *) (req + 1);
-    uv_buf_t *outbuf2 = outbuf1 + 1;
-    *outbuf1 = uv_buf_init((char *) hdr, HEADER_BYTES);
-    *outbuf2 = uv_buf_init((char *) buf, len);
-
-    uv_buf_t bufs[2] = {
-        *outbuf1,
-        *outbuf2,
-    };
-
-    req->data = ctx;
-    int rc = uv_write(req, &ctx->inet_tcp.stream, bufs, 2, send_cb);
-    if (rc) {
-        logger_log(LOG_ERR, "TCP Write error: %s", uv_strerror(rc));
-        free(buf);
-    }
+    tun_to_tcp(buf, len, &ctx->inet_tcp.stream);
 }

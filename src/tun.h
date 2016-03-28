@@ -75,6 +75,7 @@ void network_to_tun(int tunfd, uint8_t *buf, ssize_t len);
 void connect_to_server(struct tundev_context *ctx);
 void tun_to_tcp_client(struct peer *peer, uint8_t *buf, int len);
 void tun_to_tcp_server(struct tundev_context *ctx, uint8_t *buf, int len);
+void tun_to_tcp(uint8_t *buf, int len, uv_stream_t *stream);
 void tun_to_udp(struct tundev_context *ctx, uint8_t *buf, int len,
                 struct sockaddr *addr);
 

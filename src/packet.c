@@ -1,9 +1,22 @@
 #include <string.h>
 #include <assert.h>
 
+#include "uv.h"
+
 #include "util.h"
 #include "packet.h"
 
+
+void
+packet_alloc(struct packet *packet, uv_buf_t *buf) {
+    if (packet->size) {
+        buf->base = (char *) packet->buf + packet->offset;
+        buf->len = packet->size - packet->offset;
+    } else {
+        buf->base = (char *) packet->buf + (packet->read ? 1 : 0);
+        buf->len = packet->read ? 1 : HEADER_BYTES;
+    }
+}
 
 int
 packet_filter(struct packet *packet, const char *buf, ssize_t buflen) {

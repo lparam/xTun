@@ -30,15 +30,6 @@ static void signal_cb(uv_signal_t *handle, int signum);
 static void signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data);
 
 
-#ifdef ANDROID
-int
-protect_socket(int fd) {
-    int err = protectSocket(fd);
-    logger_log(err ? LOG_INFO : LOG_ERR, "Protect socket %s", err ? "successful" : "failed");
-    return !err;
-}
-#endif
-
 void
 network_to_tun(int tunfd, uint8_t *buf, ssize_t len) {
     uint8_t *pos = buf;
@@ -54,6 +45,34 @@ network_to_tun(int tunfd, uint8_t *buf, ssize_t len) {
         }
         pos += sz;
         remaining -= sz;
+    }
+}
+
+static void
+close_tunfd(int fd) {
+    /* valgrind may generate a false alarm here */
+    if(ioctl(fd, TUNSETPERSIST, 0) < 0) {
+        logger_stderr("ioctl(TUNSETPERSIST): %s", strerror(errno));
+    }
+    close(fd);
+}
+
+static void
+close_socket_handle(struct tundev_context *ctx) {
+    if (mode == xTUN_SERVER) {
+        uv_close(&ctx->inet_tcp.handle, NULL);
+        uv_close((uv_handle_t *) &ctx->inet_udp, NULL);
+
+    } else {
+        if (protocol == xTUN_TCP) {
+            if (uv_is_active(&ctx->inet_tcp.handle)) {
+                uv_close(&ctx->inet_tcp.handle, NULL);
+            }
+            uv_close((uv_handle_t *) &ctx->timer, NULL);
+
+        } else {
+            uv_close((uv_handle_t *) &ctx->inet_udp, NULL);
+        }
     }
 }
 
@@ -137,13 +156,15 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
 #ifndef ANDROID
 struct tundev *
 tun_alloc(char *iface, uint32_t parallel) {
-    int i, err, fd;
+    int i, err, fd, nqueues;
     struct tundev *tun;
 
-    size_t ctxsz = sizeof(struct tundev_context) * parallel;
+    nqueues = mode == xTUN_SERVER ? parallel : 1;
+
+    size_t ctxsz = sizeof(struct tundev_context) * nqueues;
     tun = malloc(sizeof(*tun) + ctxsz);
     memset(tun, 0, sizeof(*tun) + ctxsz);
-    tun->queues = parallel;
+    tun->queues = nqueues;
     strcpy(tun->iface, iface);
 
     struct ifreq ifr;
@@ -151,7 +172,7 @@ tun_alloc(char *iface, uint32_t parallel) {
     ifr.ifr_flags = IFF_TUN | IFF_NO_PI | IFF_MULTI_QUEUE;
     strncpy(ifr.ifr_name, tun->iface, IFNAMSIZ);
 
-    for (i = 0; i < parallel; i++) {
+    for (i = 0; i < nqueues; i++) {
         if ((fd = open("/dev/net/tun", O_RDWR | O_NONBLOCK)) < 0 ) {
             logger_stderr("Open /dev/net/tun: %s", strerror(errno));
             goto err;
@@ -165,10 +186,6 @@ tun_alloc(char *iface, uint32_t parallel) {
         struct tundev_context *ctx = &tun->contexts[i];
         ctx->tun = tun;
         ctx->tunfd = fd;
-        if (mode == xTUN_SERVER) {
-            ctx->inet_udp_fd = create_socket(SOCK_DGRAM, 1);
-            ctx->inet_tcp_fd = create_socket(SOCK_STREAM, 1);
-        }
     }
 
     return tun;
@@ -176,10 +193,6 @@ err:
     for (--i; i >= 0; i--) {
         struct tundev_context *ctx = &tun->contexts[i];
         close(ctx->tunfd);
-        close(ctx->inet_udp_fd);
-        if (mode == xTUN_SERVER) {
-            close(ctx->inet_tcp_fd);
-        }
     }
     free(tun);
     return NULL;
@@ -198,7 +211,6 @@ tun_alloc() {
 
     struct tundev_context *ctx = tun->contexts;
     ctx->tun = tun;
-    ctx->interval = 5;
 
     return tun;
 }
@@ -206,10 +218,17 @@ tun_alloc() {
 
 void
 tun_free(struct tundev *tun) {
-    int i;
-    for (i = 0; i < tun->queues; i++) {
-        free(tun->contexts[i].network_buffer);
-        free(tun->contexts[i].packet.buf);
+    for (int i = 0; i < tun->queues; i++) {
+        if (mode == xTUN_SERVER) {
+            free(tun->contexts[i].packet.buf);
+            free(tun->contexts[i].network_buffer);
+        } else {
+            if (protocol == xTUN_TCP) {
+                free(tun->contexts[i].packet.buf);
+            } else {
+                free(tun->contexts[i].network_buffer);
+            }
+        }
     }
     free(tun);
 }
@@ -284,13 +303,6 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu,
 	}
 
     close(inet4);
-
-    for (int i = 0; i < tun->queues; i++) {
-        struct tundev_context *ctx = &tun->contexts[i];
-        ctx->network_buffer = malloc(mtu + PRIMITIVE_BYTES);
-        ctx->packet.buf = malloc(mtu + OVERHEAD_BYTES);
-        ctx->packet.max = mtu + PRIMITIVE_BYTES;
-    }
 }
 #else
 static void
@@ -299,23 +311,16 @@ tun_close(uv_async_t *handle) {
                                               async_handle);
     struct tundev *tun = ctx->tun;
 
-    uv_poll_stop(&ctx->watcher);
     uv_close((uv_handle_t *) &ctx->async_handle, NULL);
-
-    if (protocol == xTUN_TCP) {
-        uv_close(&ctx->inet_tcp.handle, NULL);
-        uv_close((uv_handle_t *) &ctx->timer, NULL);
-    } else {
-        uv_close((uv_handle_t *) &ctx->inet_udp, NULL);
-    }
+    close_socket_handle(ctx);
+    uv_poll_stop(&ctx->watcher);
+    close_tunfd(ctx->tunfd);
 
     if (!tun->global) {
         clear_dns_query();
     }
 
     tun_free(tun);
-
-    logger_log(LOG_WARNING, "xTun stoped.");
 }
 
 int
@@ -343,14 +348,6 @@ tun_config(struct tundev *tun, int fd, int mtu, int prot, int global, int v,
 
     ctx->tunfd = fd;
 
-    if (protocol == xTUN_UDP) {
-        ctx->inet_udp_fd = create_socket(SOCK_DGRAM, 1);
-    }
-
-    ctx->network_buffer = malloc(mtu + PRIMITIVE_BYTES);
-    ctx->packet.buf = malloc(mtu + OVERHEAD_BYTES);
-    ctx->packet.max = mtu + PRIMITIVE_BYTES;
-
     uv_async_init(uv_default_loop(), &ctx->async_handle, tun_close);
     uv_unref((uv_handle_t *) &ctx->async_handle);
 
@@ -358,10 +355,10 @@ tun_config(struct tundev *tun, int fd, int mtu, int prot, int global, int v,
 }
 #endif
 
-#ifndef ANDROID
 void
 tun_stop(struct tundev *tun) {
-    if (tun->queues > 1) {
+#ifndef ANDROID
+    if (mode == xTUN_SERVER && tun->queues > 1) {
         for (int i = 0; i < tun->queues; i++) {
             struct tundev_context *ctx = &tun->contexts[i];
             uv_async_send(&ctx->async_handle);
@@ -369,51 +366,24 @@ tun_stop(struct tundev *tun) {
 
     } else {
         struct tundev_context *ctx = tun->contexts;
-        if (mode == xTUN_SERVER) {
-            uv_close(&ctx->inet_tcp.handle, NULL);
-            uv_close((uv_handle_t *) &ctx->inet_udp, NULL);
-
-        } else {
-            if (protocol == xTUN_TCP) {
-                if (uv_is_active(&ctx->inet_tcp.handle)) {
-                    uv_close(&ctx->inet_tcp.handle, NULL);
-                }
-                uv_close((uv_handle_t *) &ctx->timer, NULL);
-
-            } else {
-                uv_close((uv_handle_t *) &ctx->inet_udp, NULL);
-            }
-        }
-        /* TODO: Close tun when all clients disconnected */
+        close_socket_handle(ctx);
         uv_poll_stop(&ctx->watcher);
-        /* valgrind may generate a false alarm here */
-        if(ioctl(ctx->tunfd, TUNSETPERSIST, 0) < 0) {
-            logger_stderr("ioctl(TUNSETPERSIST): %s", strerror(errno));
-        }
-        close(ctx->tunfd);
+        close_tunfd(ctx->tunfd);
     }
-}
 #else
-void
-tun_stop(struct tundev *tun) {
     struct tundev_context *ctx = tun->contexts;
     uv_async_send(&ctx->async_handle);
-}
 #endif
+}
 
 static void
 queue_close(uv_async_t *handle) {
     struct tundev_context *ctx = container_of(handle, struct tundev_context,
                                               async_handle);
-    uv_close(&ctx->inet_tcp.handle, NULL);
-    uv_close((uv_handle_t *) &ctx->inet_udp, NULL);
     uv_close((uv_handle_t *) &ctx->async_handle, NULL);
+    close_socket_handle(ctx);
     uv_poll_stop(&ctx->watcher);
-    /* valgrind may generate a false alarm here */
-    if(ioctl(ctx->tunfd, TUNSETPERSIST, 0) < 0) {
-        logger_stderr("ioctl(TUNSETPERSIST): %s", strerror(errno));
-        close(ctx->tunfd);
-    }
+    close_tunfd(ctx->tunfd);
 }
 
 static void
@@ -425,7 +395,11 @@ queue_start(void *arg) {
     uv_async_init(&loop, &ctx->async_handle, queue_close);
 
     udp_start(ctx, &loop);
-    tcp_server_start(ctx, &loop);
+    if (mode == xTUN_SERVER) {
+        tcp_server_start(ctx, &loop);
+    } else {
+        tcp_client_start(ctx, &loop);
+    }
 
     uv_poll_init(&loop, &ctx->watcher, ctx->tunfd);
     uv_poll_start(&ctx->watcher, UV_READABLE, poll_cb);
@@ -433,6 +407,7 @@ queue_start(void *arg) {
     uv_run(&loop, UV_RUN_DEFAULT);
 
     loop_close(&loop);
+
     uv_sem_post(&ctx->semaphore);
 }
 
@@ -483,7 +458,6 @@ signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data) {
 
 int
 tun_start(struct tundev *tun) {
-    int i;
     uv_loop_t *loop = uv_default_loop();
 
     if (mode == xTUN_SERVER) {
@@ -491,7 +465,8 @@ tun_start(struct tundev *tun) {
         init_peers(peers);
     }
 
-    if (tun->queues > 1) {
+    if (mode == xTUN_SERVER && tun->queues > 1) {
+        int i;
         for (i = 0; i < tun->queues; i++) {
             uv_thread_t thread_id;
             struct tundev_context *ctx = &tun->contexts[i];
@@ -502,6 +477,7 @@ tun_start(struct tundev *tun) {
         signal_install(loop, signal_cb, tun);
 
         uv_run(loop, UV_RUN_DEFAULT);
+
         loop_close(loop);
 
         for (i = 0; i < tun->queues; i++) {
@@ -530,18 +506,14 @@ tun_start(struct tundev *tun) {
         signal_install(loop, signal_cb, tun);
 #endif
 
-#ifdef ANDROID
-        logger_log(LOG_INFO, "xTun started.");
-#endif
-
         uv_run(loop, UV_RUN_DEFAULT);
 
-        if (mode == xTUN_SERVER) {
-            uv_rwlock_destroy(&rwlock);
-            destroy_peers(peers);
-        }
-
         loop_close(loop);
+    }
+
+    if (mode == xTUN_SERVER) {
+        uv_rwlock_destroy(&rwlock);
+        destroy_peers(peers);
     }
 
     return 0;

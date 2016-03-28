@@ -18,6 +18,9 @@
 #include "crypto.h"
 #include "peer.h"
 #include "tun.h"
+#ifdef ANDROID
+#include "android.h"
+#endif
 
 
 static void
@@ -101,24 +104,21 @@ int
 udp_start(struct tundev_context *ctx, uv_loop_t *loop) {
     int rc;
 
+    ctx->network_buffer = malloc(ctx->tun->mtu + PRIMITIVE_BYTES);
+
     uv_udp_init(loop, &ctx->inet_udp);
 
-    if (mode == xTUN_SERVER) {
-        if ((rc = uv_udp_open(&ctx->inet_udp, ctx->inet_udp_fd))) {
-            logger_log(LOG_ERR, "udp open error: %s", uv_strerror(rc));
-            exit(1);
-        }
-
-    } else {
-#ifdef ANDROID
-        int fd = create_socket(SOCK_DGRAM, 1);
-        if ((rc = uv_udp_open(&ctx->inet_udp, fd))) {
-            logger_log(LOG_ERR, "udp open error: %s", uv_strerror(rc));
-        } else {
-            protect_socket(fd);
-        }
-#endif
+    ctx->inet_udp_fd = create_socket(SOCK_DGRAM, mode == xTUN_SERVER ? 1 : 0);
+    if ((rc = uv_udp_open(&ctx->inet_udp, ctx->inet_udp_fd))) {
+        logger_log(LOG_ERR, "udp open error: %s", uv_strerror(rc));
+        exit(1);
     }
+
+#ifdef ANDROID
+        rc = protectSocket(ctx->inet_udp_fd);
+        logger_log(rc ? LOG_INFO : LOG_ERR, "Protect socket %s",
+                   rc ? "successful" : "failed");
+#endif
 
     if (mode == xTUN_SERVER) {
         rc = uv_udp_bind(&ctx->inet_udp, &ctx->tun->addr, UV_UDP_REUSEADDR);

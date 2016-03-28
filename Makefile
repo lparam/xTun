@@ -47,21 +47,18 @@ CPPFLAGS = -DCROSS_COMPILE
 endif
 
 CFLAGS = \
-	-Os	\
+	-O2	\
 	-g \
 	-std=gnu99 \
 	-Wall \
 	$(PLATFORM_CFLAGS)
 
-CFLAGS += -fomit-frame-pointer -fdata-sections -ffunction-sections
+# CFLAGS += -fomit-frame-pointer
+CFLAGS += -fdata-sections -ffunction-sections
 
 ifneq (,$(findstring android,$(CROSS_COMPILE)))
 CPPFLAGS += -DANDROID
 ANDROID = 1
-endif
-
-ifneq (,$(findstring mingw32,$(CROSS_COMPILE)))
-MINGW32 = 1
 endif
 
 EXTRA_CFLAGS =
@@ -80,19 +77,13 @@ LDFLAGS = -Wl,--gc-sections
 ifdef ANDROID
 LDFLAGS += -pie -fPIE
 else
-	ifndef MINGW32
-		LIBS += -lrt
-	endif
+LIBS += -lrt
 endif
 
 LIBS += $(OBJTREE)/3rd/libuv/.libs/libuv.a
 LIBS += $(OBJTREE)/3rd/libsodium/src/libsodium/.libs/libsodium.a
 
-ifdef MINGW32
-LIBS += -lws2_32 -lpsapi -liphlpapi -luserenv
-else
 LIBS += -pthread -ldl
-endif
 
 LDFLAGS += $(LIBS)
 
@@ -134,12 +125,13 @@ $(XTUN): \
 	$(OBJTREE)/src/crypto.o \
 	$(OBJTREE)/src/peer.o \
 	$(OBJTREE)/src/packet.o \
+	$(OBJTREE)/src/tcp.o \
 	$(OBJTREE)/src/tcp_client.o \
 	$(OBJTREE)/src/tcp_server.o \
 	$(OBJTREE)/src/udp.o \
 	$(OBJTREE)/src/tun.o \
 	$(OBJTREE)/src/main.o
-	$(LINK) $^ -o $@ $(FINAL_CFLAGS) $(LDFLAGS)
+	$(LINK) $^ -o $@ $(LDFLAGS)
 
 $(XTUN_STATIC): \
 	$(OBJTREE)/src/util.o \
@@ -149,6 +141,7 @@ $(XTUN_STATIC): \
 	$(OBJTREE)/src/android.o \
 	$(OBJTREE)/src/peer.o \
 	$(OBJTREE)/src/packet.o \
+	$(OBJTREE)/src/tcp.o \
 	$(OBJTREE)/src/tcp_client.o \
 	$(OBJTREE)/src/tcp_server.o \
 	$(OBJTREE)/src/udp.o \

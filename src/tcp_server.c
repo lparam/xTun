@@ -45,13 +45,6 @@ client_close_cb(uv_handle_t *handle) {
     free_client(client);
 }
 
-/* static void
-shutdown_cb(uv_shutdown_t *req, int status) {
-    struct client_context *client = container_of(req, struct client_context,
-                                                 shutdown_req);
-    uv_close(&client->handle.handle, client_close_cb);
-} */
-
 static void
 close_client(struct client_context *client) {
     if (client->peer) {
@@ -111,9 +104,9 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
             if (peer == NULL) {
                 char saddr[24] = {0}, daddr[24] = {0};
                 parse_addr(iphdr, saddr, daddr);
-                logger_log(LOG_WARNING, "[TCP] Cache miss: %s -> %s", saddr, daddr);
+                logger_log(LOG_WARNING, "[TCP] Cache miss: %s -> %s",
+                           saddr, daddr);
 
-                /* check source address is the same network */
                 struct sockaddr addr;
                 int len = sizeof(addr);
                 uv_tcp_getpeername(&client->handle.tcp, &addr, &len);

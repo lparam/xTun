@@ -115,7 +115,7 @@ udp_start(struct tundev_context *ctx, uv_loop_t *loop) {
     }
 
 #ifdef ANDROID
-        rc = protectSocket(ctx->inet_udp_fd);
+        rc = protect_socket(ctx->inet_udp_fd);
         logger_log(rc ? LOG_INFO : LOG_ERR, "Protect socket %s",
                    rc ? "successful" : "failed");
 #endif

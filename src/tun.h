@@ -54,6 +54,8 @@ struct tundev {
     char                   ifconf[128];
     int                    mode;
     int                    mtu;
+    in_addr_t              network;
+    in_addr_t              netmask;
     struct sockaddr        addr;
 #ifdef ANDROID
     int                    global;

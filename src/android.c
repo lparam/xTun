@@ -140,7 +140,7 @@ new_query(int tunfd, struct iphdr *iphdr, struct udphdr *udphdr) {
         return NULL;
     }
 
-    protectSocket(fd);
+    protect_socket(fd);
 
     return query;
 }

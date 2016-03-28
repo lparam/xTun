@@ -70,9 +70,11 @@ alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
 
 static void
 recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
-    struct client_context *client = container_of(stream, struct client_context,
-                                                 handle.stream);
-    struct tundev_context *ctx = stream->data;
+    struct tundev_context *ctx;
+    struct client_context *client;
+
+    ctx = stream->data;
+    client = container_of(stream, struct client_context, handle.stream);
 
     if (nread > 0) {
         struct packet *packet = &client->packet;
@@ -93,6 +95,15 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         }
 
         struct iphdr *iphdr = (struct iphdr *) m;
+
+        in_addr_t client_network = iphdr->saddr & htonl(ctx->tun->netmask);
+        if (client_network != ctx->tun->network) {
+            char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
+            logger_log(LOG_ERR, "Invalid client network: %s", a);
+            close_client(client);
+            return;
+        }
+
         if (client->peer == NULL) {
             uv_rwlock_rdlock(&rwlock);
             struct peer *peer = lookup_peer(iphdr->saddr, peers);

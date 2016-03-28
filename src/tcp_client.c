@@ -126,7 +126,7 @@ connect_to_server(struct tundev_context *ctx) {
     }
 
 #ifdef ANDROID
-    rc = protectSocket(ctx->inet_tcp_fd);
+    rc = protect_socket(ctx->inet_tcp_fd);
     logger_log(rc ? LOG_INFO : LOG_ERR, "Protect socket %s",
                rc ? "successful" : "failed");
     logger_log(LOG_INFO, "Connect to server...");

@@ -11,8 +11,9 @@ struct tundev;
 
 #ifdef ANDROID
 struct tundev * tun_alloc(void);
-int tun_config(struct tundev *tun, int fd, int mtu, int protocol, int global,
-               int verbose, const char *server, int port, const char *dns);
+int tun_config(struct tundev *tun, const char *ifconf, int fd, int mtu,
+               int protocol, int global, int verbose, const char *server,
+               int port, const char *dns);
 #else
 struct tundev * tun_alloc(char *iface, uint32_t queues);
 void tun_config(struct tundev *tun, const char *ifconf, int mtu,

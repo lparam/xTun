@@ -95,8 +95,9 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
         return;
     }
 
+    struct iphdr *iphdr = (struct iphdr *) m;
+
     if (mode == xTUN_SERVER) {
-        struct iphdr *iphdr = (struct iphdr *) m;
         uv_rwlock_rdlock(&rwlock);
         struct peer *peer = lookup_peer(iphdr->daddr, peers);
         uv_rwlock_rdunlock(&rwlock);
@@ -118,15 +119,23 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
         }
 
     } else {
+        in_addr_t client_network = iphdr->saddr & htonl(ctx->tun->netmask);
+        if (client_network != ctx->tun->network) {
+            char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
+            logger_log(LOG_ERR, "Invalid client network: %s", a);
+            free(tunbuf);
+            return;
+        }
+
 #ifdef ANDROID
         if (!tun->global) {
-            struct iphdr *iphdr = (struct iphdr *) m;
             uint16_t frag = iphdr->frag_off & htons(0x1fff);
             if ((iphdr->protocol == IPPROTO_UDP) && (frag == 0)) {
-                struct udphdr *udph = (struct udphdr *) (m + sizeof(struct iphdr));
+                struct udphdr *udph = (struct udphdr *)
+                                      (m + sizeof(struct iphdr));
                 if (ntohs(udph->dest) == DNS_PORT) {
-                    int rc = handle_local_dns_query(ctx->tunfd, &tun->dns_server,
-                                                    m, mlen);
+                    int rc = handle_local_dns_query(ctx->tunfd,
+                                                    &tun->dns_server, m, mlen);
                     if (rc) {
                         return;
                     }
@@ -243,17 +252,19 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu,
 
     tun->addr = *addr;
 
-	char *nmask = strchr(ifconf, '/');
-	if(!nmask) {
+	char *cidr = strchr(ifconf, '/');
+	if(!cidr) {
 		logger_stderr("ifconf syntax error: %s", ifconf);
 		exit(0);
 	}
 
 	uint8_t ipaddr[16] = {0};
-	memcpy(ipaddr, ifconf, (uint32_t) (nmask - ifconf));
+	memcpy(ipaddr, ifconf, (uint32_t) (cidr - ifconf));
 
 	in_addr_t netmask = 0xffffffff;
-	netmask = netmask << (32 - atoi(++nmask));
+	netmask = netmask << (32 - atoi(++cidr));
+    tun->netmask = netmask;
+    tun->network = inet_addr((const char *) ipaddr) & htonl(netmask);
 
     int inet4 = socket(AF_INET, SOCK_DGRAM, 0);
 	if (inet4 < 0) {
@@ -270,12 +281,12 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu,
 
     saddr = (struct sockaddr_in *) &ifr.ifr_addr;
     saddr->sin_family = AF_INET;
-    saddr->sin_addr.s_addr = inet_addr((const char *)ipaddr);
+    saddr->sin_addr.s_addr = inet_addr((const char *) ipaddr);
 	if(saddr->sin_addr.s_addr == INADDR_NONE) {
         logger_stderr("Invalid IP address: %s", ifconf);
 		exit(1);
 	}
-    if(ioctl(inet4, SIOCSIFADDR, (void *)&ifr) < 0) {
+    if(ioctl(inet4, SIOCSIFADDR, (void *) &ifr) < 0) {
         logger_stderr("ioctl(SIOCSIFADDR): %s", strerror(errno));
 		exit(1);
     }
@@ -283,21 +294,21 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu,
     saddr = (struct sockaddr_in *)&ifr.ifr_netmask;
     saddr->sin_family = AF_INET;
     saddr->sin_addr.s_addr = htonl(netmask);
-    if(ioctl(inet4, SIOCSIFNETMASK, (void *)&ifr) < 0) {
+    if(ioctl(inet4, SIOCSIFNETMASK, (void *) &ifr) < 0) {
         logger_stderr("ioctl(SIOCSIFNETMASK): %s", strerror(errno));
 		exit(1);
     }
 
     /* Activate interface. */
 	ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
-	if(ioctl(inet4, SIOCSIFFLAGS, (void *)&ifr) < 0) {
+	if(ioctl(inet4, SIOCSIFFLAGS, (void *) &ifr) < 0) {
         logger_stderr("ioctl(SIOCSIFFLAGS): %s", strerror(errno));
 		exit(1);
 	}
 
     /* Set MTU if it is specified. */
 	ifr.ifr_mtu = mtu;
-	if(ioctl(inet4, SIOCSIFMTU, (void *)&ifr) < 0) {
+	if(ioctl(inet4, SIOCSIFMTU, (void *) &ifr) < 0) {
         logger_stderr("ioctl(SIOCSIFMTU): %s", strerror(errno));
 		exit(1);
 	}
@@ -324,8 +335,8 @@ tun_close(uv_async_t *handle) {
 }
 
 int
-tun_config(struct tundev *tun, int fd, int mtu, int prot, int global, int v,
-           const char *server, int port, const char *dns)
+tun_config(struct tundev *tun, const char *ifconf, int fd, int mtu, int prot,
+           int global, int v, const char *server, int port, const char *dns)
 {
     struct sockaddr addr;
     struct tundev_context *ctx = tun->contexts;
@@ -334,6 +345,20 @@ tun_config(struct tundev *tun, int fd, int mtu, int prot, int global, int v,
         logger_stderr("Invalid server address");
         return 1;
     }
+
+	char *cidr = strchr(ifconf, '/');
+	if(!cidr) {
+		logger_stderr("ifconf syntax error: %s", ifconf);
+		exit(0);
+	}
+
+	uint8_t ipaddr[16] = {0};
+	memcpy(ipaddr, ifconf, (uint32_t) (cidr - ifconf));
+
+	in_addr_t netmask = 0xffffffff;
+	netmask = netmask << (32 - atoi(++cidr));
+    tun->netmask = netmask;
+    tun->network = inet_addr((const char *) ipaddr) & htonl(netmask);
 
     verbose = v;
     protocol = prot;

@@ -33,4 +33,6 @@
 
 *.swp
 .ycm_extra_conf.pyc
+/core
 /xTun
+/xTund

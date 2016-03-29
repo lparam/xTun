@@ -34,7 +34,7 @@ Usage
 ### Server
 
 ```bash
-xTun -i IFACE -I IP/MASK -m server -k PASSWORD -P PARALLEL
+xTun -I IP/MASK -k PASSWORD -s -P PARALLEL
 scripts/server_up.sh
 ```
 
@@ -47,7 +47,7 @@ scripts/server_down.sh
 ### Client
 
 ```bash
-xTun -i IFACE -I IP/MASK -m client -k PASSWORD -s SERVER
+xTun -I IP/MASK -k PASSWORD -c SERVER
 scripts/client_up.sh
 ```
 

@@ -1,6 +1,6 @@
 #!/bin/sh
 
-NET=10.0.0.1/16
+NET=10.0.0.1/24
 CHAIN=xTun
 
 # Turn off IP forwarding

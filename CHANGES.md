@@ -1,3 +1,8 @@
+v0.5.0 (2016-3-29)
+-----------
+* Feature: TCP support
+
+
 v0.4.0 (2015-12-05)
 -----------
 * Feature: Multiqueue support
@@ -16,4 +21,3 @@ v0.2.0 (2015-8-29)
 v0.1.0 (2015-8-29)
 -----------
 * The first public version.
-

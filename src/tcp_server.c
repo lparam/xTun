@@ -102,7 +102,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         in_addr_t client_network = iphdr->saddr & htonl(ctx->tun->netmask);
         if (client_network != ctx->tun->network) {
             char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
-            logger_log(LOG_ERR, "Invalid client network: %s", a);
+            logger_log(LOG_ERR, "Invalid client: %s", a);
             close_client(client);
             return;
         }

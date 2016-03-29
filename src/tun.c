@@ -113,16 +113,17 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
         } else {
             char saddr[24] = {0}, daddr[24] = {0};
             parse_addr(iphdr, saddr, daddr);
-            logger_log(LOG_ERR, "Destination address miss: %s -> %s",
+            logger_log(LOG_ERR, "Client is not connected: %s -> %s",
                        saddr, daddr);
             free(tunbuf);
+            return;
         }
 
     } else {
         in_addr_t client_network = iphdr->saddr & htonl(ctx->tun->netmask);
         if (client_network != ctx->tun->network) {
             char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
-            logger_log(LOG_ERR, "Invalid client network: %s", a);
+            logger_log(LOG_ERR, "Invalid client: %s", a);
             free(tunbuf);
             return;
         }

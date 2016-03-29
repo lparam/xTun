@@ -35,6 +35,9 @@ static void
 inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
              const struct sockaddr *addr, unsigned flags)
 {
+    struct tundev_context *ctx = container_of(handle, struct tundev_context,
+                                              inet_udp);
+
     if (nread > 0) {
         uint8_t *m = (uint8_t *)buf->base;
         ssize_t mlen = nread - PRIMITIVE_BYTES;
@@ -48,11 +51,16 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
             return;
         }
 
-        struct tundev_context *ctx = container_of(handle, struct tundev_context,
-                                                  inet_udp);
-
         if (mode == xTUN_SERVER) {
             struct iphdr *iphdr = (struct iphdr *) m;
+
+            in_addr_t client_network = iphdr->saddr & htonl(ctx->tun->netmask);
+            if (client_network != ctx->tun->network) {
+                char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
+                logger_log(LOG_ERR, "Invalid client: %s", a);
+                return;
+            }
+
             // TODO: Compare source address
             uv_rwlock_rdlock(&rwlock);
             struct peer *peer = lookup_peer(iphdr->saddr, peers);

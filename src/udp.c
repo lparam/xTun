@@ -41,7 +41,10 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
 
         int rc = crypto_decrypt(m, (uint8_t *)buf->base, nread);
         if (rc) {
-            logger_log(LOG_ERR, "Invalid udp packet");
+            int port = 0;
+            char remote[INET_ADDRSTRLEN + 1];
+            port = ip_name(addr, remote, sizeof(remote));
+            logger_log(LOG_ERR, "Invalid udp packet from %s:%d", remote, port);
             return;
         }
 

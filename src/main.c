@@ -29,24 +29,24 @@ static char *xsignal;
 
 int signal_process(char *signal, const char *pidfile);
 
-static const char *_optString = "i:I:m:k:s:b:tp:P:nVvh";
+static const char *_optString = "i:I:k:c:sb:tp:P:nVvh";
 static const struct option _lopts[] = {
     { "",        required_argument,   NULL, 'i' },
     { "",        required_argument,   NULL, 'I' },
-    { "",        required_argument,   NULL, 'm' },
     { "",        required_argument,   NULL, 'k' },
-    { "",        required_argument,   NULL, 's' },
-    { "",        required_argument,   NULL, 'b' },
-    { "",        required_argument,   NULL, 'p' },
+    { "client",  required_argument,   NULL, 'c' },
+    { "server",  no_argument,         NULL, 's' },
+    { "port",    required_argument,   NULL, 'p' },
+    { "bind",    required_argument,   NULL, 'b' },
     { "",        required_argument,   NULL, 'P' },
-    { "",        no_argument,         NULL, 't' },
+    { "tcp",     no_argument,         NULL, 't' },
     { "mtu",     required_argument,   NULL,  0  },
     { "pid",     required_argument,   NULL,  0  },
     { "signal",  required_argument,   NULL,  0  },
-    { "version", no_argument,         NULL, 'v' },
     { "",        no_argument,         NULL, 'n' },
-    { "help",    no_argument,         NULL, 'h' },
     { "",        no_argument,         NULL, 'V' },
+    { "version", no_argument,         NULL, 'v' },
+    { "help",    no_argument,         NULL, 'h' },
     { NULL,      no_argument,         NULL,  0  }
 };
 
@@ -57,17 +57,18 @@ print_usage(const char *prog) {
     printf("Usage:\n  %s [options]\n", prog);
     printf("Options:\n");
     puts(""
-         "  -I <ifconf>\t\t IP address of interface (e.g. 10.3.0.1/16)\n"
-         "  -m <mode>\t\t client or server\n"
+         "  -I <ifconf>\t\t CIDR of interface (e.g. 10.3.0.1/16)\n"
          "  -k <encryption_key>\t shared password for data encryption\n"
-         "  -s <server address>\t server address:port (only available in client mode)\n"
+         "  -c --client <host>\t run in client mode, connecting to <host>\n"
+         "  -s --server\t\t run in server mode\n"
+         "  [-p --port <port>]\t server port to listen on/connect to (default: 1082)\n"
          "  [-i <iface>]\t\t interface name (default: tun0)\n"
-         "  [-t]\t\t\t tcp mode (only available on client mode)\n"
-         "  [-b <bind address>]\t bind address:port (only available on server mode, default: 0.0.0.0:1082)\n"
-         "  [-p <pid_file>]\t PID file of daemon (default: /var/run/xTun.pid)\n"
-         "  [-P <parallel>]\t number of parallel instance to run (only available on server mode)\n"
+         "  [-b --bind <host>]\t bind to a specific interface (only available on server mode, default: 0.0.0.0)\n"
+         "  [-P <parallel>]\t number of parallel tun queues (only available on server mode)\n"
+         "  [--pid <pid>]\t\t PID file of daemon (default: /var/run/xTun.pid)\n"
          "  [--mtu <mtu>]\t\t MTU size (default: 1426)\n"
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
+         "  [-t --tcp]\t\t use TCP rather than UDP (only available on client mode)\n"
          "  [-n]\t\t\t non daemon mode\n"
          "  [-h, --help]\t\t this help\n"
          "  [-v, --version]\t show version\n"
@@ -88,18 +89,15 @@ parse_opts(int argc, char *argv[]) {
         case 'I':
             ifconf = optarg;
             break;
-        case 'm':
-            if (strcmp("server", optarg) == 0) {
-                mode = xTUN_SERVER;
-            } else if (strcmp("client", optarg) == 0) {
-                mode = xTUN_CLIENT;
-            }
+        case 'c':
+            mode = xTUN_CLIENT;
+            addrbuf = optarg;
+            break;
+        case 's':
+            mode = xTUN_SERVER;
             break;
         case 'k':
             password = optarg;
-            break;
-        case 's':
-            addrbuf = optarg;
             break;
         case 'b':
             addrbuf = optarg;
@@ -188,7 +186,7 @@ main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (!addrbuf) {
+    if (addrbuf == NULL) {
         if (mode == xTUN_SERVER) {
             addrbuf = "0.0.0.0";
         } else {

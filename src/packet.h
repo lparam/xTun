@@ -10,9 +10,9 @@
 #define PRIMITIVE_BYTES 24
 #define OVERHEAD_BYTES  26
 
-#define PACKET_COMPLETED  0
+#define PACKET_UNCOMPLETE 0
 #define PACKET_INVALID    1
-#define PACKET_UNCOMPLETE 2
+#define PACKET_COMPLETED  2
 
 struct packet {
     int read;

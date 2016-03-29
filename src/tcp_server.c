@@ -17,6 +17,7 @@ struct client_context {
         uv_handle_t handle;
         uv_stream_t stream;
     } handle;
+    struct sockaddr addr;
     struct packet packet;
     struct peer *peer;
 };
@@ -52,6 +53,15 @@ close_client(struct client_context *client) {
         client->peer = NULL;
     }
     uv_close(&client->handle.handle, client_close_cb);
+}
+
+static void
+handle_invalid_packet(struct client_context *client) {
+    int port = 0;
+    char remote[INET_ADDRSTRLEN + 1];
+    port = ip_name(&client->addr, remote, sizeof(remote));
+    logger_log(LOG_ERR, "Invalid tcp packet from %s:%d", remote, port);
+    close_client(client);
 }
 
 static void
@@ -107,12 +117,8 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
                 logger_log(LOG_WARNING, "[TCP] Cache miss: %s -> %s",
                            saddr, daddr);
 
-                struct sockaddr addr;
-                int len = sizeof(addr);
-                uv_tcp_getpeername(&client->handle.tcp, &addr, &len);
-
                 uv_rwlock_wrlock(&rwlock);
-                peer = save_peer(iphdr->saddr, &addr, peers);
+                peer = save_peer(iphdr->saddr, &client->addr, peers);
                 uv_rwlock_wrunlock(&rwlock);
 
             } else {
@@ -142,8 +148,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     return;
 
 error:
-    logger_log(LOG_ERR, "Invalid tcp packet");
-    close_client(client);
+    handle_invalid_packet(client);
 }
 
 static void
@@ -154,8 +159,11 @@ accept_cb(uv_stream_t *stream, int status) {
     uv_tcp_init(stream->loop, &client->handle.tcp);
     int rc = uv_accept(stream, &client->handle.stream);
     if (rc == 0) {
+        int len = sizeof(struct sockaddr);
+        uv_tcp_getpeername(&client->handle.tcp, &client->addr, &len);
         client->handle.stream.data = ctx;
         uv_read_start(&client->handle.stream, alloc_cb, recv_cb);
+
     } else {
         logger_log(LOG_ERR, "accept error: %s", uv_strerror(rc));
         close_client(client);

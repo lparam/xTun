@@ -23,7 +23,6 @@
 #define DEFAULT_LINE_LENGTH_BYTES (16)
 
 
-
 static int
 print_buffer(const void *data, uint32_t count, uint32_t width, uint32_t linelen) {
     /* linebuf as a union causes proper alignment */
@@ -164,12 +163,12 @@ resolve_addr(const char *buf, int port, struct sockaddr *addr) {
             goto err;
 
         } else {
-            *addr = *(struct sockaddr *) &addr4;
+            *addr = *((struct sockaddr *) &addr4);
         }
 
     } else {
         uv_ip6_addr(buf, port, &addr6);
-        *addr = *(struct sockaddr*)&addr6;
+        *addr = *((struct sockaddr *) &addr6);
     }
 
 err:

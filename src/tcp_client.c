@@ -84,7 +84,6 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 
 err:
     logger_log(LOG_ERR, "Invalid tcp packet");
-    /* uv_read_stop(stream); */
     disconnect(ctx);
 }
 

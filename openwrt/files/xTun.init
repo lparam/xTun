@@ -7,7 +7,8 @@ FIREWALL_RELOAD=0
 
 IFACE=tun0
 IP=10.0.0.2/24
-SERVER=IP:PORT
+SERVER=IP
+PORT=PORt
 PASSWORD=PASSWORD
 
 IP_ROUTE_TABLE=xTun
@@ -18,7 +19,7 @@ DNS=8.8.8.8
 BLACK_LIST=/etc/black_list
 
 start() {
-    xTun -i $IFACE -I $IP -m client -k $PASSWORD -s $SERVER
+    xTun -i $IFACE -I $IP -k $PASSWORD -c $SERVER -p $PORT
     net_start
     acl add
 }

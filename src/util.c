@@ -19,13 +19,8 @@
 #include "logger.h"
 
 
-#if defined(_WIN32)
-#define strdup _strdup
-#endif
-
 #define MAX_LINE_LENGTH_BYTES (64)
 #define DEFAULT_LINE_LENGTH_BYTES (16)
-
 
 
 static int
@@ -101,32 +96,29 @@ dump_hex(const void *data, uint32_t len, char *title) {
     print_buffer(data, len, 1, 16);
 }
 
+
+void
+print_rss() {
+    size_t rss;
+    uv_resident_set_memory(&rss);
+    logger_log(LOG_DEBUG, "resident set memory: %llu", (unsigned long long) rss);
+}
+
 int
-resolve_addr(const char *buf, struct sockaddr *addr) {
-    char *p;
-    char *tmp = strdup(buf);
+resolve_addr(const char *buf, int port, struct sockaddr *addr) {
     int rc = 0;
-    long port;
     struct sockaddr_in addr4;
     struct sockaddr_in6 addr6;
 
-    if ((p = strrchr(tmp, ':')) == NULL) {
-        logger_log(LOG_ERR, "Address must contain port number: %s", tmp);
-        rc = 1;
-        goto err;
-    }
-    *p++ = '\0';
-
-    port = strtol(p, NULL, 10);
     if ((port <= 0) || (port >= 65536)) {
-        logger_log(LOG_ERR, "Invalid port number: %s", p);
+        logger_log(LOG_ERR, "Invalid port number: %d", port);
         rc = 1;
         goto err;
     }
 
     /* If the IP address contains ':', it's IPv6; otherwise, IPv4 or domain. */
-    if (strchr(tmp, ':') == NULL) {
-        rc = uv_ip4_addr(tmp, port, &addr4);
+    if (strchr(buf, ':') == NULL) {
+        rc = uv_ip4_addr(buf, port, &addr4);
         if (rc) {
             struct addrinfo hints;
             struct addrinfo *result, *rp;
@@ -136,14 +128,16 @@ resolve_addr(const char *buf, struct sockaddr *addr) {
             hints.ai_socktype = SOCK_STREAM;
             rc = 0;
 
-            int err = getaddrinfo(tmp, p, &hints, &result);
+            char service[6] = {0};
+            snprintf(service, 6, "%d", port);
+            int err = getaddrinfo(buf, service, &hints, &result);
             if (err != 0) {
-                logger_stderr("Resolve %s error: %s", tmp, gai_strerror(err));
+                logger_stderr("Resolve %s error: %s", buf, gai_strerror(err));
                 rc = 1;
                 goto err;
             }
 
-            // IPV4 priority
+            /* IPV4 priority */
             for (rp = result; rp != NULL; rp = rp->ai_next) {
                 if (rp->ai_family == AF_INET) {
                     memcpy(addr, rp->ai_addr, sizeof(struct sockaddr_in));
@@ -161,7 +155,7 @@ resolve_addr(const char *buf, struct sockaddr *addr) {
             }
 
             if (rp == NULL) {
-                logger_stderr("Failed to resolve address: %s", tmp);
+                logger_stderr("resolve address failed: %s", buf);
                 rc = 1;
             }
 
@@ -169,16 +163,15 @@ resolve_addr(const char *buf, struct sockaddr *addr) {
             goto err;
 
         } else {
-            *addr = *(struct sockaddr*)&addr4;
+            *addr = *((struct sockaddr *) &addr4);
         }
 
     } else {
-        uv_ip6_addr(tmp, port, &addr6);
-        *addr = *(struct sockaddr*)&addr6;
+        uv_ip6_addr(buf, port, &addr6);
+        *addr = *((struct sockaddr *) &addr6);
     }
 
 err:
-    free(tmp);
     return rc;
 }
 
@@ -186,53 +179,13 @@ int
 ip_name(const struct sockaddr *ip, char *name, size_t size) {
     int port = -1;
     if (ip->sa_family == AF_INET) {
-        uv_ip4_name((const struct sockaddr_in*)ip, name, size);
-        port = ntohs(((const struct sockaddr_in*)ip)->sin_port);
+        uv_ip4_name((const struct sockaddr_in *) ip, name, size);
+        port = ntohs(((const struct sockaddr_in *) ip)->sin_port);
     } else if (ip->sa_family == AF_INET6) {
-        uv_ip6_name((const struct sockaddr_in6*)ip, name, size);
-        port = ntohs(((const struct sockaddr_in6*)ip)->sin6_port);
+        uv_ip6_name((const struct sockaddr_in6 *) ip, name, size);
+        port = ntohs(((const struct sockaddr_in6 *) ip)->sin6_port);
     }
     return port;
-}
-
-static inline in_addr_t *
-as_in_addr(struct sockaddr *sa) {
-    return &((struct sockaddr_in *)sa)->sin_addr.s_addr;
-}
-
-int
-add_route(const char *name, const char *address, int prefix) {
-    int rc = 0;
-    int inet4 = socket(AF_INET, SOCK_DGRAM, 0);
-
-    struct rtentry rt4;
-    memset(&rt4, 0, sizeof(rt4));
-    rt4.rt_dev = (char *)name;
-    rt4.rt_flags = RTF_UP;
-    rt4.rt_dst.sa_family = AF_INET;
-    rt4.rt_genmask.sa_family = AF_INET;
-
-    if (inet_pton(AF_INET, address, as_in_addr(&rt4.rt_dst)) != 1 ||
-            prefix < 0 || prefix > 32) {
-        rc = 1;
-    }
-
-    in_addr_t mask = prefix ? (~0 << (32 - prefix)) : 0x80000000;
-    *as_in_addr(&rt4.rt_genmask) = htonl(mask);
-    if (ioctl(inet4, SIOCADDRT, &rt4) && errno != EEXIST) {
-        rc = 1;
-    }
-
-    if (!prefix) {
-        // Split the route instead of replacing the default route.
-        *as_in_addr(&rt4.rt_dst) ^= htonl(0x80000000);
-        if (ioctl(inet4, SIOCADDRT, &rt4) && errno != EEXIST) {
-            rc = 1;
-        }
-    }
-
-    close(inet4);
-    return rc;
 }
 
 int
@@ -259,3 +212,51 @@ pid_t gettid() {
     return syscall(SYS_gettid);
 }
 #endif
+
+int
+read_size(uint8_t *buffer) {
+	int r = (int)buffer[0] << 8 | (int)buffer[1];
+	return r;
+}
+
+void
+write_size(uint8_t *buffer, int len) {
+	buffer[0] = (len >> 8) & 0xff;
+	buffer[1] = len & 0xff;
+}
+
+void
+parse_addr(struct iphdr *iphdr, char *saddr, char *daddr) {
+    char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
+    strcpy(saddr, a);
+    a = inet_ntoa(*(struct in_addr *) &iphdr->daddr);
+    strcpy(daddr, a);
+}
+
+static void *
+uv_malloc(size_t size) {
+    logger_log(LOG_DEBUG, "malloc %ld", size);
+    return malloc(size);
+}
+
+static void *
+uv_realloc(void *ptr, size_t size) {
+    logger_log(LOG_DEBUG, "realloc %p %ld", ptr, size);
+    return realloc(ptr, size);
+}
+
+static void *
+uv_callc(size_t count, size_t size) {
+    logger_log(LOG_DEBUG, "calloc %ld", size);
+    return calloc(count, size);
+}
+
+static void
+uv_free(void *ptr) {
+    logger_log(LOG_DEBUG, "free %p", ptr);
+    free(ptr);
+}
+
+int replace_allocator() {
+    return uv_replace_allocator(uv_malloc, uv_realloc, uv_callc, uv_free);
+}

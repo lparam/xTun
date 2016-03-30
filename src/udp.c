@@ -103,10 +103,9 @@ tun_to_udp(struct tundev_context *ctx, uint8_t *buf, int len,
     uv_buf_t *outbuf = (uv_buf_t *) (write_req + 1);
     outbuf->base = (char *) buf;
     outbuf->len = len;
-    if (write_req) {
-        write_req->data = ctx;
-        uv_udp_send(write_req, &ctx->inet_udp, outbuf, 1, addr, inet_send_cb);
-    } else {
+    int rc = uv_udp_send(write_req, &ctx->inet_udp, outbuf, 1, addr, inet_send_cb);
+    if (rc) {
+        logger_log(LOG_ERR, "UDP Write error: %s", uv_strerror(rc));
         free(buf);
     }
 }

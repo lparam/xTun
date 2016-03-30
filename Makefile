@@ -103,6 +103,7 @@ android: libuv libsodium $(XTUN_STATIC)
 $(OBJTREE)/3rd/libuv/Makefile: | 3rd/libuv/autogen.sh
 	$(Q)mkdir -p $(OBJTREE)/3rd/libuv
 	$(Q)cd 3rd/libuv && ./autogen.sh
+	$(Q)cd 3rd/libuv &&autoreconf --force --install
 	$(Q)cd $(OBJTREE)/3rd/libuv && $(SRCTREE)/3rd/libuv/configure --host=$(HOST) LDFLAGS= && $(MAKE)
 
 libuv: $(OBJTREE)/3rd/libuv/Makefile

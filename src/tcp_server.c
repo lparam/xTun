@@ -162,6 +162,8 @@ accept_cb(uv_stream_t *stream, int status) {
         int len = sizeof(struct sockaddr);
         uv_tcp_getpeername(&client->handle.tcp, &client->addr, &len);
         client->handle.stream.data = ctx;
+        uv_tcp_nodelay(&client->handle.tcp, 1);
+        uv_tcp_keepalive(&client->handle.tcp, 1, 60);
         uv_read_start(&client->handle.stream, alloc_cb, recv_cb);
 
     } else {
@@ -188,9 +190,6 @@ tcp_server_start(struct tundev_context *ctx, uv_loop_t *loop) {
         exit(1);
     }
 
-    rc = uv_tcp_nodelay(&ctx->inet_tcp.tcp, 1);
-    rc = uv_tcp_keepalive(&ctx->inet_tcp.tcp, 1, 60);
-
     ctx->inet_tcp.tcp.data = ctx;
     rc = uv_listen(&ctx->inet_tcp.stream, 128, accept_cb);
     if (rc) {
@@ -205,5 +204,7 @@ tun_to_tcp_client(struct peer *peer, uint8_t *buf, int len) {
     struct client_context *client = peer->data;
     if (client) {
         tun_to_tcp(buf, len, &client->handle.stream);
+    } else {
+        free(buf);
     }
 }

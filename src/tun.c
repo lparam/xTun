@@ -453,7 +453,7 @@ loop_close(uv_loop_t *loop) {
 
 static void
 signal_close() {
-    for (int i = 0; i <= 2; i++) {
+    for (int i = 0; i < 2; i++) {
         uv_signal_stop(&signals[i].sig);
     }
 }
@@ -475,7 +475,7 @@ static void
 signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data) {
     signals[0].signum = SIGINT;
     signals[1].signum = SIGQUIT;
-    for (int i = 0; i <= 2; i++) {
+    for (int i = 0; i < 2; i++) {
         signals[i].sig.data = data;
         uv_signal_init(loop, &signals[i].sig);
         uv_signal_start(&signals[i].sig, cb, signals[i].signum);

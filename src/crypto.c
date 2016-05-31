@@ -16,9 +16,9 @@
 #define COB crypto_onetimeauth_BYTES // 16U
 #define COKB crypto_onetimeauth_KEYBYTES // 32U
 #define CSSNB crypto_stream_salsa20_NONCEBYTES // 8U
-#define CSSKB crypto_stream_salsa20_KEYBYTES //32U
+#define CSSKB crypto_stream_salsa20_KEYBYTES // 32U
 
-static uint8_t secret_key[crypto_generichash_BYTES];
+static uint8_t secret_key[crypto_generichash_BYTES]; // 32U
 
 
 static int

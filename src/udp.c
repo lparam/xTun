@@ -68,7 +68,8 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
             if (peer == NULL) {
                 char saddr[24] = {0}, daddr[24] = {0};
                 parse_addr(iphdr, saddr, daddr);
-                logger_log(LOG_WARNING, "[UDP] Cache miss: %s -> %s", saddr, daddr);
+                logger_log(LOG_WARNING, "[UDP] Cache miss: %s -> %s",
+                           saddr, daddr);
                 uv_rwlock_wrlock(&rwlock);
                 peer = save_peer(iphdr->saddr, (struct sockaddr *) addr, peers);
                 uv_rwlock_wrunlock(&rwlock);
@@ -103,7 +104,8 @@ tun_to_udp(struct tundev_context *ctx, uint8_t *buf, int len,
     uv_buf_t *outbuf = (uv_buf_t *) (write_req + 1);
     outbuf->base = (char *) buf;
     outbuf->len = len;
-    int rc = uv_udp_send(write_req, &ctx->inet_udp, outbuf, 1, addr, inet_send_cb);
+    int rc = uv_udp_send(write_req, &ctx->inet_udp, outbuf, 1, addr,
+                         inet_send_cb);
     if (rc) {
         logger_log(LOG_ERR, "UDP Write error: %s", uv_strerror(rc));
         free(buf);

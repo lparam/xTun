@@ -27,9 +27,9 @@ static struct client_context *
 new_client(int mtu) {
     struct client_context *client = malloc(sizeof(*client));
     memset(client, 0, sizeof(*client));
-    client->packet.buf = malloc(mtu + OVERHEAD_BYTES);
+    client->packet.buf = malloc(PRIMITIVE_BYTES + mtu);
+    client->packet.max = PRIMITIVE_BYTES + mtu;
     packet_reset(&client->packet);
-    client->packet.max = mtu + PRIMITIVE_BYTES;
     return client;
 }
 
@@ -61,6 +61,7 @@ handle_invalid_packet(struct client_context *client) {
     char remote[INET_ADDRSTRLEN + 1];
     port = ip_name(&client->addr, remote, sizeof(remote));
     logger_log(LOG_ERR, "Invalid tcp packet from %s:%d", remote, port);
+    packet_reset(&client->packet);
     close_client(client);
 }
 
@@ -78,9 +79,9 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 
     ctx = stream->data;
     client = container_of(stream, struct client_context, handle.stream);
+    struct packet *packet = &client->packet;
 
     if (nread > 0) {
-        struct packet *packet = &client->packet;
         int rc = packet_filter(packet, buf->base, nread);
         if (rc == PACKET_UNCOMPLETE) {
             return;
@@ -91,6 +92,8 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         int clen = packet->size;
         int mlen = packet->size - PRIMITIVE_BYTES;
         uint8_t *c = packet->buf, *m = packet->buf;
+
+        assert(mlen > 0 && mlen <= ctx->tun->mtu);
 
         int err = crypto_decrypt(m, c, clen);
         if (err) {
@@ -148,6 +151,9 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     return;
 
 error:
+    if (verbose) {
+        dump_hex(buf->base, nread, "Invalid tcp Packet");
+    }
     handle_invalid_packet(client);
 }
 

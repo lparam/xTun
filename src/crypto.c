@@ -23,7 +23,8 @@ static uint8_t secret_key[crypto_generichash_BYTES]; // 32U
 
 static int
 salsa208poly1305_encrypt(uint8_t *c, const uint8_t *m, const uint32_t mlen,
-  const uint8_t *n, const uint8_t *k) {
+                         const uint8_t *n, const uint8_t *k)
+{
     uint8_t cok[COKB];
 
     crypto_stream_salsa208(cok, COKB, n, k);
@@ -35,7 +36,8 @@ salsa208poly1305_encrypt(uint8_t *c, const uint8_t *m, const uint32_t mlen,
 
 static int
 salsa208poly1305_decrypt(uint8_t *m, const uint8_t *c, const uint32_t clen,
-  const uint8_t *n, const uint8_t *k) {
+                         const uint8_t *n, const uint8_t *k)
+{
     uint8_t cok[COKB];
 
     if (clen < COB) {
@@ -61,11 +63,14 @@ crypto_init(const char *password) {
     randombytes_set_implementation(&randombytes_salsa20_implementation);
     randombytes_stir();
 
-    return crypto_generichash(secret_key, sizeof secret_key, (uint8_t*)password, strlen(password), NULL, 0);
+    return crypto_generichash(secret_key, sizeof secret_key,
+                              (uint8_t*)password, strlen(password), NULL, 0);
 }
 
 int
-crypto_generickey(uint8_t *out, size_t outlen, uint8_t *in, size_t inlen, uint8_t *key, size_t keylen) {
+crypto_generickey(uint8_t *out, size_t outlen, uint8_t *in, size_t inlen,
+                  uint8_t *key, size_t keylen)
+{
     return crypto_generichash(out, outlen, in, inlen, key, keylen);
 }
 
@@ -80,6 +85,10 @@ crypto_encrypt(uint8_t *c, const uint8_t *m, const uint32_t mlen) {
 int
 crypto_decrypt(uint8_t *m, const uint8_t *c, const uint32_t clen) {
     uint8_t nonce[CSSNB];
+    if (clen < CSSNB + COB) {
+        return -1;
+    }
     memcpy(nonce, c, CSSNB);
-    return salsa208poly1305_decrypt(m, c + CSSNB, clen - CSSNB, nonce, secret_key);
+    return salsa208poly1305_decrypt(m, c + CSSNB, clen - CSSNB, nonce,
+                                    secret_key);
 }

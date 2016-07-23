@@ -63,6 +63,8 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         int mlen = packet->size - PRIMITIVE_BYTES;
         uint8_t *c = packet->buf, *m = packet->buf;
 
+        assert(mlen > 0 && mlen <= ctx->tun->mtu);
+
         int err = crypto_decrypt(m, c, clen);
         if (err) {
             goto err;
@@ -84,6 +86,9 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 
 err:
     logger_log(LOG_ERR, "Invalid tcp packet");
+    if (verbose) {
+        dump_hex(buf->base, nread, "Invalid tcp Packet");
+    }
     disconnect(ctx);
 }
 
@@ -147,8 +152,9 @@ connect_to_server(struct tundev_context *ctx) {
 int
 tcp_client_start(struct tundev_context *ctx, uv_loop_t *loop) {
     ctx->interval = 5;
-    ctx->packet.buf = malloc(ctx->tun->mtu + OVERHEAD_BYTES);
-    ctx->packet.max = ctx->tun->mtu + PRIMITIVE_BYTES;
+    ctx->packet.buf = malloc(PRIMITIVE_BYTES + ctx->tun->mtu);
+    ctx->packet.max = PRIMITIVE_BYTES + ctx->tun->mtu;
+    packet_reset(&ctx->packet);
     uv_timer_init(loop, &ctx->timer);
     connect_to_server(ctx);
     return 0;

@@ -1,6 +1,6 @@
 MAJOR = 0
 MINOR = 5
-PATCH = 0
+PATCH = 1
 NAME = xTun
 
 ifdef O
@@ -46,7 +46,7 @@ ifdef CROSS_COMPILE
 CPPFLAGS = -DCROSS_COMPILE
 endif
 
-CFLAGS = \
+CFLAGS += \
 	-O2	\
 	-g \
 	-std=gnu99 \
@@ -103,6 +103,7 @@ android: libuv libsodium $(XTUN_STATIC)
 $(OBJTREE)/3rd/libuv/Makefile: | 3rd/libuv/autogen.sh
 	$(Q)mkdir -p $(OBJTREE)/3rd/libuv
 	$(Q)cd 3rd/libuv && ./autogen.sh
+	$(Q)cd 3rd/libuv &&autoreconf --force -ivf
 	$(Q)cd $(OBJTREE)/3rd/libuv && $(SRCTREE)/3rd/libuv/configure --host=$(HOST) LDFLAGS= && $(MAKE)
 
 libuv: $(OBJTREE)/3rd/libuv/Makefile

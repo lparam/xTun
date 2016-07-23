@@ -128,19 +128,19 @@ new_query(int tunfd, struct iphdr *iphdr, struct udphdr *udphdr) {
     query->timer = malloc(sizeof(uv_timer_t));
 
     uv_udp_init(uv_default_loop(), &query->handle);
-    uv_timer_init(uv_default_loop(), query->timer);
-    uv_udp_recv_start(&query->handle, dns_alloc_cb, dns_recv_cb);
 
-    uv_os_fd_t fd = 0;
-    int rc = uv_fileno((uv_handle_t*) &query->handle, &fd);
-    if (rc) {
-        logger_log(LOG_ERR, "Get fileno error: %s", uv_strerror(rc));
+    int rc;
+    int fd = create_socket(SOCK_DGRAM, 0);
+    if ((rc = uv_udp_open(&query->handle, fd))) {
+        logger_log(LOG_ERR, "UDP open error: %s", uv_strerror(rc));
         free(query->timer);
         free(query);
         return NULL;
     }
-
     protect_socket(fd);
+
+    uv_timer_init(uv_default_loop(), query->timer);
+    uv_udp_recv_start(&query->handle, dns_alloc_cb, dns_recv_cb);
 
     return query;
 }

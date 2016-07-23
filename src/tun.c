@@ -1,5 +1,6 @@
 #include <unistd.h>
 #include <string.h>
+#include <assert.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <linux/if.h>
@@ -60,7 +61,9 @@ close_tunfd(int fd) {
 static void
 close_socket_handle(struct tundev_context *ctx) {
     if (mode == xTUN_SERVER) {
-        uv_close(&ctx->inet_tcp.handle, NULL);
+        if (uv_is_active(&ctx->inet_tcp.handle)) {
+            uv_close(&ctx->inet_tcp.handle, NULL);
+        }
         uv_close((uv_handle_t *) &ctx->inet_udp, NULL);
 
     } else {
@@ -102,6 +105,7 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
         struct peer *peer = lookup_peer(iphdr->daddr, peers);
         uv_rwlock_rdunlock(&rwlock);
         if (peer) {
+            assert(peer->protocol == xTUN_TCP || peer->protocol == xTUN_UDP);
             crypto_encrypt(tunbuf, m, mlen);
             if (peer->protocol == xTUN_TCP) {
                 tun_to_tcp_client(peer, tunbuf, PRIMITIVE_BYTES + mlen);
@@ -421,11 +425,7 @@ queue_start(void *arg) {
     uv_async_init(&loop, &ctx->async_handle, queue_close);
 
     udp_start(ctx, &loop);
-    if (mode == xTUN_SERVER) {
-        tcp_server_start(ctx, &loop);
-    } else {
-        tcp_client_start(ctx, &loop);
-    }
+    /* tcp_server_start(ctx, &loop); */
 
     uv_poll_init(&loop, &ctx->watcher, ctx->tunfd);
     uv_poll_start(&ctx->watcher, UV_READABLE, poll_cb);
@@ -453,7 +453,7 @@ loop_close(uv_loop_t *loop) {
 
 static void
 signal_close() {
-    for (int i = 0; i <= 2; i++) {
+    for (int i = 0; i < 2; i++) {
         uv_signal_stop(&signals[i].sig);
     }
 }
@@ -475,7 +475,7 @@ static void
 signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data) {
     signals[0].signum = SIGINT;
     signals[1].signum = SIGQUIT;
-    for (int i = 0; i <= 2; i++) {
+    for (int i = 0; i < 2; i++) {
         signals[i].sig.data = data;
         uv_signal_init(loop, &signals[i].sig);
         uv_signal_start(&signals[i].sig, cb, signals[i].signum);

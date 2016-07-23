@@ -117,7 +117,7 @@ net_stop() {
 
 acl() {
     if [ ! -f $BLACK_LIST ]; then
-        exit 1
+        return
     fi
 
     while read line;do

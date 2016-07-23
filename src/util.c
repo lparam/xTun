@@ -197,10 +197,14 @@ create_socket(int type, int reuse) {
         return -1;
     }
     if (reuse) {
-#ifdef SO_REUSEPORT
         int yes = 1;
+#ifdef SO_REUSEPORT
         if (setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &yes, sizeof(yes))) {
             logger_stderr("setsockopt SO_REUSEPORT error: %s", strerror(errno));
+        }
+#else
+        if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes))) {
+            logger_stderr("setsockopt SO_REUSEADDR error: %s", strerror(errno));
         }
 #endif
     }

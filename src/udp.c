@@ -35,53 +35,68 @@ static void
 inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
              const struct sockaddr *addr, unsigned flags)
 {
+    if (nread <= 0) {
+        return;
+    }
+
     struct tundev_context *ctx = container_of(handle, struct tundev_context,
                                               inet_udp);
 
-    if (nread > 0) {
-        uint8_t *m = (uint8_t *)buf->base;
-        ssize_t mlen = nread - PRIMITIVE_BYTES;
+    uint8_t *m = (uint8_t *)buf->base;
+    ssize_t mlen = nread - PRIMITIVE_BYTES;
 
-        int rc = crypto_decrypt(m, (uint8_t *)buf->base, nread);
-        if (rc) {
-            int port = 0;
-            char remote[INET_ADDRSTRLEN + 1];
-            port = ip_name(addr, remote, sizeof(remote));
-            logger_log(LOG_ERR, "Invalid udp packet from %s:%d", remote, port);
+    int valid = mlen > 0 && mlen <= ctx->tun->mtu;
+    if (!valid) {
+        goto error;
+    }
+
+    int rc = crypto_decrypt(m, (uint8_t *)buf->base, nread);
+    if (rc) {
+        goto error;
+    }
+
+    if (mode == xTUN_SERVER) {
+        struct iphdr *iphdr = (struct iphdr *) m;
+
+        in_addr_t client_network = iphdr->saddr & htonl(ctx->tun->netmask);
+        if (client_network != ctx->tun->network) {
+            char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
+            logger_log(LOG_ERR, "Invalid client: %s", a);
             return;
         }
 
-        if (mode == xTUN_SERVER) {
-            struct iphdr *iphdr = (struct iphdr *) m;
+        // TODO: Compare source address
+        uv_rwlock_rdlock(&rwlock);
+        struct peer *peer = lookup_peer(iphdr->saddr, peers);
+        uv_rwlock_rdunlock(&rwlock);
+        if (peer == NULL) {
+            char saddr[24] = {0}, daddr[24] = {0};
+            parse_addr(iphdr, saddr, daddr);
+            logger_log(LOG_WARNING, "[UDP] Cache miss: %s -> %s",
+              saddr, daddr);
+            uv_rwlock_wrlock(&rwlock);
+            peer = save_peer(iphdr->saddr, (struct sockaddr *) addr, peers);
+            uv_rwlock_wrunlock(&rwlock);
 
-            in_addr_t client_network = iphdr->saddr & htonl(ctx->tun->netmask);
-            if (client_network != ctx->tun->network) {
-                char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
-                logger_log(LOG_ERR, "Invalid client: %s", a);
-                return;
+        } else {
+            if (memcmp(&peer->remote_addr, addr, sizeof(*addr))) {
+                peer->remote_addr = *addr;
             }
-
-            // TODO: Compare source address
-            uv_rwlock_rdlock(&rwlock);
-            struct peer *peer = lookup_peer(iphdr->saddr, peers);
-            uv_rwlock_rdunlock(&rwlock);
-            if (peer == NULL) {
-                char saddr[24] = {0}, daddr[24] = {0};
-                parse_addr(iphdr, saddr, daddr);
-                logger_log(LOG_WARNING, "[UDP] Cache miss: %s -> %s", saddr, daddr);
-                uv_rwlock_wrlock(&rwlock);
-                peer = save_peer(iphdr->saddr, (struct sockaddr *) addr, peers);
-                uv_rwlock_wrunlock(&rwlock);
-
-            } else {
-                if (memcmp(&peer->remote_addr, addr, sizeof(*addr))) {
-                    peer->remote_addr = *addr;
-                }
-            }
-            peer->protocol = xTUN_UDP;
         }
+        peer->protocol = xTUN_UDP;
+    }
 
-        network_to_tun(ctx->tunfd, m, mlen);
+    network_to_tun(ctx->tunfd, m, mlen);
+
+    return;
+
+    int port = 0;
+    char remote[INET_ADDRSTRLEN + 1];
+error:
+    port = ip_name(addr, remote, sizeof(remote));
+    logger_log(LOG_ERR, "Invalid udp packet from %s:%d", remote, port);
+    if (verbose) {
+        dump_hex(buf->base, nread, "Invalid udp Packet");
     }
 }
 
@@ -103,10 +118,10 @@ tun_to_udp(struct tundev_context *ctx, uint8_t *buf, int len,
     uv_buf_t *outbuf = (uv_buf_t *) (write_req + 1);
     outbuf->base = (char *) buf;
     outbuf->len = len;
-    if (write_req) {
-        write_req->data = ctx;
-        uv_udp_send(write_req, &ctx->inet_udp, outbuf, 1, addr, inet_send_cb);
-    } else {
+    int rc = uv_udp_send(write_req, &ctx->inet_udp, outbuf, 1, addr,
+                         inet_send_cb);
+    if (rc) {
+        logger_log(LOG_ERR, "UDP Write error: %s", uv_strerror(rc));
         free(buf);
     }
 }
@@ -121,7 +136,7 @@ udp_start(struct tundev_context *ctx, uv_loop_t *loop) {
 
     ctx->inet_udp_fd = create_socket(SOCK_DGRAM, mode == xTUN_SERVER ? 1 : 0);
     if ((rc = uv_udp_open(&ctx->inet_udp, ctx->inet_udp_fd))) {
-        logger_log(LOG_ERR, "udp open error: %s", uv_strerror(rc));
+        logger_log(LOG_ERR, "UDP open error: %s", uv_strerror(rc));
         exit(1);
     }
 
@@ -134,7 +149,7 @@ udp_start(struct tundev_context *ctx, uv_loop_t *loop) {
     if (mode == xTUN_SERVER) {
         rc = uv_udp_bind(&ctx->inet_udp, &ctx->tun->addr, UV_UDP_REUSEADDR);
         if (rc) {
-            logger_stderr("udp bind error: %s", uv_strerror(rc));
+            logger_stderr("UDP bind error: %s", uv_strerror(rc));
             exit(1);
         }
     }

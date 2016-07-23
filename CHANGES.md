@@ -1,3 +1,11 @@
+v0.5.1 (2016-7-23)
+-----------
+* Fix: Free buffer
+* Fix: Verify cipher length
+* Fix: Running instance
+* Feature: Reuse socket
+
+
 v0.5.0 (2016-3-29)
 -----------
 * Feature: TCP support

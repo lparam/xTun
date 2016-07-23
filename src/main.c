@@ -64,7 +64,7 @@ print_usage(const char *prog) {
          "  [-p --port <port>]\t server port to listen on/connect to (default: 1082)\n"
          "  [-i <iface>]\t\t interface name (default: tun0)\n"
          "  [-b --bind <host>]\t bind to a specific interface (only available on server mode, default: 0.0.0.0)\n"
-         "  [-P <parallel>]\t number of parallel tun queues (only available on server mode)\n"
+         "  [-P <parallel>]\t number of parallel tun queues (only available on server mode & UDP)\n"
          "  [--pid <pid>]\t\t PID file of daemon (default: /var/run/xTun.pid)\n"
          "  [--mtu <mtu>]\t\t MTU size (default: 1426)\n"
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"

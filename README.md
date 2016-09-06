@@ -17,6 +17,7 @@ BUILD
 ### Linux
 
 ```bash
+git clone --recursive https://github.com/lparam/xTun.git
 make && make install
 ```
 

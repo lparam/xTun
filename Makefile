@@ -120,6 +120,7 @@ libsodium: $(OBJTREE)/3rd/libsodium/Makefile
 
 $(XTUN): \
 	$(OBJTREE)/src/util.o \
+	$(OBJTREE)/src/common.o \
 	$(OBJTREE)/src/logger.o \
 	$(OBJTREE)/src/daemon.o \
 	$(OBJTREE)/src/signal.o \
@@ -136,6 +137,7 @@ $(XTUN): \
 
 $(XTUN_STATIC): \
 	$(OBJTREE)/src/util.o \
+	$(OBJTREE)/src/common.o \
 	$(OBJTREE)/src/logger.o \
 	$(OBJTREE)/src/crypto.o \
 	$(OBJTREE)/src/checksum.o \

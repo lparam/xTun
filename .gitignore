@@ -33,6 +33,6 @@
 
 *.swp
 .ycm_extra_conf.pyc
+.vscode
 /core
 /xTun
-/xTund

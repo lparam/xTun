@@ -14,6 +14,8 @@
 #include "crypto.h"
 #include "peer.h"
 #include "tun.h"
+#include "tcp.h"
+#include "udp.h"
 #ifdef ANDROID
 #include "android.h"
 #endif
@@ -30,9 +32,8 @@ static void loop_close(uv_loop_t *loop);
 static void signal_cb(uv_signal_t *handle, int signum);
 static void signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data);
 
-
 void
-network_to_tun(int tunfd, uint8_t *buf, ssize_t len) {
+tun_write(int tunfd, uint8_t *buf, ssize_t len) {
     uint8_t *pos = buf;
     size_t remaining = len;
     while(remaining) {
@@ -59,22 +60,16 @@ close_tunfd(int fd) {
 }
 
 static void
-close_socket_handle(struct tundev_context *ctx) {
+close_network(struct tundev_context *ctx) {
     if (mode == xTUN_SERVER) {
-        if (uv_is_active(&ctx->inet_tcp.handle)) {
-            uv_close(&ctx->inet_tcp.handle, NULL);
-        }
-        uv_close((uv_handle_t *) &ctx->inet_udp, NULL);
+        tcp_server_stop(ctx);
+        udp_stop(ctx);
 
     } else {
         if (protocol == xTUN_TCP) {
-            if (uv_is_active(&ctx->inet_tcp.handle)) {
-                uv_close(&ctx->inet_tcp.handle, NULL);
-            }
-            uv_close((uv_handle_t *) &ctx->timer, NULL);
-
+            tcp_client_stop(ctx);
         } else {
-            uv_close((uv_handle_t *) &ctx->inet_udp, NULL);
+            udp_stop(ctx);
         }
     }
 }
@@ -108,28 +103,31 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
             assert(peer->protocol == xTUN_TCP || peer->protocol == xTUN_UDP);
             crypto_encrypt(tunbuf, m, mlen);
             if (peer->protocol == xTUN_TCP) {
-                tun_to_tcp_client(peer, tunbuf, PRIMITIVE_BYTES + mlen);
+                tcp_server_send(peer, tunbuf, PRIMITIVE_BYTES + mlen);
             } else {
-                tun_to_udp(ctx, tunbuf, PRIMITIVE_BYTES + mlen,
+                udp_send(ctx, tunbuf, PRIMITIVE_BYTES + mlen,
                            &peer->remote_addr);
             }
 
         } else {
             char saddr[24] = {0}, daddr[24] = {0};
             parse_addr(iphdr, saddr, daddr);
-            logger_log(LOG_ERR, "Client is not connected: %s -> %s",
-                       saddr, daddr);
-            free(tunbuf);
-            return;
+            in_addr_t network = iphdr->daddr & htonl(ctx->tun->netmask);
+            if (network != ctx->tun->network) {
+                logger_log(LOG_NOTICE, "Discard %s -> %s", saddr, daddr);
+            } else {
+                logger_log(LOG_WARNING, "Client is not connected: %s -> %s",
+                           saddr, daddr);
+            }
+            return free(tunbuf);
         }
 
     } else {
-        in_addr_t client_network = iphdr->saddr & htonl(ctx->tun->netmask);
-        if (client_network != ctx->tun->network) {
+        in_addr_t network = iphdr->saddr & htonl(ctx->tun->netmask);
+        if (network != ctx->tun->network) {
             char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
             logger_log(LOG_ERR, "Invalid client: %s", a);
-            free(tunbuf);
-            return;
+            return free(tunbuf);
         }
 
 #ifdef ANDROID
@@ -151,18 +149,18 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
         if (protocol == xTUN_TCP) {
             if (ctx->connect == CONNECTED) {
                 crypto_encrypt(tunbuf, m, mlen);
-                tun_to_tcp_server(ctx, tunbuf, PRIMITIVE_BYTES + mlen);
+                tcp_client_send(ctx, tunbuf, PRIMITIVE_BYTES + mlen);
 
             } else {
                 free(tunbuf);
                 if (ctx->connect == DISCONNECTED) {
-                    connect_to_server(ctx);
+                    tcp_client_connect(ctx);
                 }
             }
 
         } else {
             crypto_encrypt(tunbuf, m, mlen);
-            tun_to_udp(ctx, tunbuf, PRIMITIVE_BYTES + mlen, &tun->addr);
+            udp_send(ctx, tunbuf, PRIMITIVE_BYTES + mlen, &tun->addr);
         }
     }
 }
@@ -268,6 +266,7 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu,
 
 	in_addr_t netmask = 0xffffffff;
 	netmask = netmask << (32 - atoi(++cidr));
+    tun->s_addr = inet_addr((const char *) ipaddr);
     tun->netmask = netmask;
     tun->network = inet_addr((const char *) ipaddr) & htonl(netmask);
 
@@ -282,9 +281,7 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu,
 	memset(&ifr, 0, sizeof ifr);
     strncpy(ifr.ifr_name, tun->iface, IFNAMSIZ);
 
-	struct sockaddr_in *saddr;
-
-    saddr = (struct sockaddr_in *) &ifr.ifr_addr;
+    struct sockaddr_in *saddr = (struct sockaddr_in *) &ifr.ifr_addr;
     saddr->sin_family = AF_INET;
     saddr->sin_addr.s_addr = inet_addr((const char *) ipaddr);
 	if(saddr->sin_addr.s_addr == INADDR_NONE) {
@@ -328,7 +325,7 @@ tun_close(uv_async_t *handle) {
     struct tundev *tun = ctx->tun;
 
     uv_close((uv_handle_t *) &ctx->async_handle, NULL);
-    close_socket_handle(ctx);
+    close_network(ctx);
     uv_poll_stop(&ctx->watcher);
     close_tunfd(ctx->tunfd);
 
@@ -362,6 +359,7 @@ tun_config(struct tundev *tun, const char *ifconf, int fd, int mtu, int prot,
 
 	in_addr_t netmask = 0xffffffff;
 	netmask = netmask << (32 - atoi(++cidr));
+    tun->s_addr = inet_addr((const char *) ipaddr);
     tun->netmask = netmask;
     tun->network = inet_addr((const char *) ipaddr) & htonl(netmask);
 
@@ -385,6 +383,15 @@ tun_config(struct tundev *tun, const char *ifconf, int fd, int mtu, int prot,
 }
 #endif
 
+int tun_keepalive(struct tundev *tun, int on, unsigned int delay) {
+    if (on && delay) {
+        tun->keepalive_delay = delay;
+    } else {
+        tun->keepalive_delay = 0;
+    }
+    return 0;
+}
+
 void
 tun_stop(struct tundev *tun) {
 #ifndef ANDROID
@@ -396,7 +403,7 @@ tun_stop(struct tundev *tun) {
 
     } else {
         struct tundev_context *ctx = tun->contexts;
-        close_socket_handle(ctx);
+        close_network(ctx);
         uv_poll_stop(&ctx->watcher);
         close_tunfd(ctx->tunfd);
     }
@@ -411,7 +418,7 @@ queue_close(uv_async_t *handle) {
     struct tundev_context *ctx = container_of(handle, struct tundev_context,
                                               async_handle);
     uv_close((uv_handle_t *) &ctx->async_handle, NULL);
-    close_socket_handle(ctx);
+    close_network(ctx);
     uv_poll_stop(&ctx->watcher);
     close_tunfd(ctx->tunfd);
 }

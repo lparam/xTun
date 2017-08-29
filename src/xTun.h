@@ -22,5 +22,6 @@ void tun_config(struct tundev *tun, const char *ifconf, int mtu,
 void tun_free(struct tundev *tun);
 int tun_start(struct tundev *tun);
 void tun_stop(struct tundev *tun);
+int tun_keepalive(struct tundev *tun, int on, unsigned int delay);
 
 #endif // for #ifndef _XTUN_H

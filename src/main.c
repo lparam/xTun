@@ -18,6 +18,7 @@
 
 static int mtu = MTU;
 static int port = 1082;
+static int keepalive = 0;
 static int daemon_mode = 1;
 static uint32_t parallel = 1;
 static char *iface = "tun0";
@@ -31,23 +32,24 @@ int signal_process(char *signal, const char *pidfile);
 
 static const char *_optString = "i:I:k:c:sb:tp:P:nVvh";
 static const struct option _lopts[] = {
-    { "",        required_argument,   NULL, 'i' },
-    { "",        required_argument,   NULL, 'I' },
-    { "",        required_argument,   NULL, 'k' },
-    { "client",  required_argument,   NULL, 'c' },
-    { "server",  no_argument,         NULL, 's' },
-    { "port",    required_argument,   NULL, 'p' },
-    { "bind",    required_argument,   NULL, 'b' },
-    { "",        required_argument,   NULL, 'P' },
-    { "tcp",     no_argument,         NULL, 't' },
-    { "mtu",     required_argument,   NULL,  0  },
-    { "pid",     required_argument,   NULL,  0  },
-    { "signal",  required_argument,   NULL,  0  },
-    { "",        no_argument,         NULL, 'n' },
-    { "",        no_argument,         NULL, 'V' },
-    { "version", no_argument,         NULL, 'v' },
-    { "help",    no_argument,         NULL, 'h' },
-    { NULL,      no_argument,         NULL,  0  }
+    { "",           required_argument,   NULL, 'i' },
+    { "",           required_argument,   NULL, 'I' },
+    { "",           required_argument,   NULL, 'k' },
+    { "client",     required_argument,   NULL, 'c' },
+    { "server",     no_argument,         NULL, 's' },
+    { "port",       required_argument,   NULL, 'p' },
+    { "bind",       required_argument,   NULL, 'b' },
+    { "",           required_argument,   NULL, 'P' },
+    { "tcp",        no_argument,         NULL, 't' },
+    { "mtu",        required_argument,   NULL,  0  },
+    { "keepalive",  required_argument,   NULL,  0  },
+    { "pid",        required_argument,   NULL,  0  },
+    { "signal",     required_argument,   NULL,  0  },
+    { "",           no_argument,         NULL, 'n' },
+    { "",           no_argument,         NULL, 'V' },
+    { "version",    no_argument,         NULL, 'v' },
+    { "help",       no_argument,         NULL, 'h' },
+    { NULL,         no_argument,         NULL,  0  }
 };
 
 
@@ -67,6 +69,7 @@ print_usage(const char *prog) {
          "  [-P <parallel>]\t number of parallel tun queues (only available on server mode & UDP)\n"
          "  [--pid <pid>]\t\t PID file of daemon (default: /var/run/xTun.pid)\n"
          "  [--mtu <mtu>]\t\t MTU size (default: 1426)\n"
+         "  [--keepalive <second>] keepalive delay (default: 0)\n"
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
          "  [-t --tcp]\t\t use TCP rather than UDP (only available on client mode)\n"
          "  [-n]\t\t\t non daemon mode\n"
@@ -143,6 +146,9 @@ parse_opts(int argc, char *argv[]) {
                 if(!mtu || mtu < 0 || mtu > 4096) {
                     mtu = MTU;
                 }
+            }
+            if (strcmp("keepalive", _lopts[longindex].name) == 0) {
+                keepalive = strtol(optarg, NULL, 10);
             }
             if (strcmp("pid", _lopts[longindex].name) == 0) {
                 pidfile = optarg;
@@ -222,6 +228,9 @@ main(int argc, char *argv[]) {
     }
 
     tun_config(tun, ifconf, mtu, &addr);
+    if (keepalive) {
+        tun_keepalive(tun, 1, keepalive);
+    }
     tun_start(tun);
 
     tun_free(tun);

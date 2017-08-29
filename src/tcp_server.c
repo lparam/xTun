@@ -3,12 +3,14 @@
 
 #include "uv.h"
 
+#include "common.h"
 #include "crypto.h"
 #include "logger.h"
 #include "packet.h"
 #include "util.h"
 #include "peer.h"
 #include "tun.h"
+#include "tcp.h"
 
 
 struct client_context {
@@ -117,7 +119,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
             if (peer == NULL) {
                 char saddr[24] = {0}, daddr[24] = {0};
                 parse_addr(iphdr, saddr, daddr);
-                logger_log(LOG_WARNING, "[TCP] Cache miss: %s -> %s",
+                logger_log(LOG_NOTICE, "[TCP] Cache miss: %s -> %s",
                            saddr, daddr);
 
                 uv_rwlock_wrlock(&rwlock);
@@ -134,10 +136,13 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
             peer->protocol= xTUN_TCP;
             peer->data = client;
             client->peer = peer;
+
+            if (check_incoming_packet(m, mlen) == 1) { // keepalive
+                return packet_reset(packet);
+            }
         }
 
-        network_to_tun(ctx->tunfd, m, mlen);
-
+        tun_write(ctx->tunfd, m, mlen);
         packet_reset(packet);
 
     } else if (nread < 0) {
@@ -206,10 +211,17 @@ tcp_server_start(struct tundev_context *ctx, uv_loop_t *loop) {
 }
 
 void
-tun_to_tcp_client(struct peer *peer, uint8_t *buf, int len) {
+tcp_server_stop(struct tundev_context *ctx) {
+    if (uv_is_active(&ctx->inet_tcp.handle)) {
+        uv_close(&ctx->inet_tcp.handle, NULL);
+    }
+}
+
+void
+tcp_server_send(struct peer *peer, uint8_t *buf, int len) {
     struct client_context *client = peer->data;
     if (client) {
-        tun_to_tcp(buf, len, &client->handle.stream);
+        tcp_send(&client->handle.stream, buf, len);
     } else {
         free(buf);
     }

@@ -89,11 +89,14 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
     int mlen = read(ctx->tunfd, m, tun->mtu);
     if (mlen <= 0) {
         logger_log(LOG_ERR, "tun read error");
-        free(tunbuf);
-        return;
+        return free(tunbuf);
     }
 
     struct iphdr *iphdr = (struct iphdr *) m;
+    if (iphdr->version != 4) {
+        logger_log(LOG_WARNING, "Discard non-IPv4 packet");
+        return free(tunbuf);
+    }
 
     if (mode == xTUN_SERVER) {
         uv_rwlock_rdlock(&rwlock);
@@ -152,10 +155,10 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
                 tcp_client_send(ctx, tunbuf, PRIMITIVE_BYTES + mlen);
 
             } else {
-                free(tunbuf);
                 if (ctx->connect == DISCONNECTED) {
                     tcp_client_connect(ctx);
                 }
+                return free(tunbuf);
             }
 
         } else {

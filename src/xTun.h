@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <netinet/in.h>
 
-#define xTun_VERSION      "0.5.1"
+#define xTun_VERSION      "0.5.2"
 #define xTun_VER          "xTun/" xTun_VERSION
 
 struct tundev;

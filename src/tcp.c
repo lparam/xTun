@@ -39,8 +39,3 @@ tcp_send(uv_stream_t *stream, uint8_t *buf, int len) {
         free(buf);
     }
 }
-
-void
-tun_to_tcp(uint8_t *buf, int len, uv_stream_t *stream) {
-    tcp_send(stream, buf, len);
-}

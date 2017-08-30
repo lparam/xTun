@@ -7,7 +7,8 @@ Features
 * Stateless
 * CCA security
 * Low cost (CPU, RAM and packet overhead)
-* Cross-platform, including PC (Linux, Mobile ([Android](https://github.com/lparam/xTun-android)) and Router (OpenWRT)
+* Cross-platform, including PC (Linux), Mobile ([Android](https://github.com/lparam/xTun-android)) and Router (OpenWRT)
+* TCP and UDP support
 * Parallelization
 
 

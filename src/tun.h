@@ -30,10 +30,8 @@ struct tundev_context {
 	int             tunfd;
     int             inet_tcp_fd;
     int             inet_udp_fd;
-    int             connect;        /* TCP client */
+    int             connect;        /* TCP client status */
     int             interval;
-    uint8_t        *network_buffer; /* UDP */
-    struct          packet packet;  /* TCP client */
     union {
         uv_tcp_t tcp;
         uv_handle_t handle;
@@ -44,8 +42,11 @@ struct tundev_context {
     uv_poll_t       watcher;
     uv_sem_t        semaphore;
     uv_async_t      async_handle;
-    uv_timer_t      timer;
+    uv_timer_t      timer_keepalive;
+    uv_timer_t      timer_reconnect;
     struct tundev  *tun;
+    struct          packet packet;  /* TCP client */
+    uint8_t        *network_buffer; /* UDP */
 };
 
 struct tundev {
@@ -53,6 +54,8 @@ struct tundev {
     char                   ifconf[128];
     int                    mode;
     int                    mtu;
+    int                    keepalive_delay;
+    in_addr_t              s_addr;
     in_addr_t              network;
     in_addr_t              netmask;
     struct sockaddr        addr;
@@ -71,21 +74,6 @@ int verbose;
 int protocol;
 uint8_t mode;
 
-void network_to_tun(int tunfd, uint8_t *buf, ssize_t len);
-
-void connect_to_server(struct tundev_context *ctx);
-void tun_to_tcp_client(struct peer *peer, uint8_t *buf, int len);
-void tun_to_tcp_server(struct tundev_context *ctx, uint8_t *buf, int len);
-void tun_to_tcp(uint8_t *buf, int len, uv_stream_t *stream);
-void tun_to_udp(struct tundev_context *ctx, uint8_t *buf, int len,
-                struct sockaddr *addr);
-
-int udp_start(struct tundev_context *ctx, uv_loop_t *loop);
-int tcp_client_start(struct tundev_context *ctx, uv_loop_t *loop);
-int tcp_server_start(struct tundev_context *ctx, uv_loop_t *loop);
-
-#ifdef ANDROID
-int protect_socket(int fd);
-#endif
+void tun_write(int tunfd, uint8_t *buf, ssize_t len);
 
 #endif // for #ifndef TUN_H

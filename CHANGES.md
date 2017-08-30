@@ -1,3 +1,8 @@
+v0.5.2 (2017-8-30)
+-----------
+* Feature: NAT Keepalive
+
+
 v0.5.1 (2016-7-23)
 -----------
 * Fix: Free buffer

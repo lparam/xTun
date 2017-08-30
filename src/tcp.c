@@ -17,7 +17,7 @@ send_cb(uv_write_t *req, int status) {
 }
 
 void
-tun_to_tcp(uint8_t *buf, int len, uv_stream_t *stream) {
+tcp_send(uv_stream_t *stream, uint8_t *buf, int len) {
     uint8_t *hdr = malloc(HEADER_BYTES);
     write_size(hdr, len);
 

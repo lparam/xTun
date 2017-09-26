@@ -1,0 +1,11 @@
+[Unit]
+Description=xTun service
+Documentation=http://github.com/lparam/xTun
+
+[Service]
+Environment=LOGFORMAT=0
+EnvironmentFile=-/etc/default/xTun
+ExecStart=/usr/local/bin/xTun $OPTIONS
+
+[Install]
+WantedBy=multi-user.target

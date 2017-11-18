@@ -3,9 +3,11 @@ Description=xTun service
 Documentation=http://github.com/lparam/xTun
 
 [Service]
+Type=forking
 Environment=LOGFORMAT=0
 EnvironmentFile=-/etc/default/xTun
 ExecStart=/usr/local/bin/xTun $OPTIONS
+ExecStop=/bin/kill -s QUIT $MAINPID
 
 [Install]
 WantedBy=multi-user.target

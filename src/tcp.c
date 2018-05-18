@@ -35,7 +35,7 @@ tcp_send(uv_stream_t *stream, uint8_t *buf, int len) {
 
     int rc = uv_write(req, stream, bufs, 2, send_cb);
     if (rc) {
-        logger_log(LOG_ERR, "TCP Write error: %s", uv_strerror(rc));
+        logger_log(LOG_ERR, "TCP Write error (%s)", uv_strerror(rc));
         free(buf);
     }
 }

@@ -97,7 +97,7 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
     char remote[INET_ADDRSTRLEN + 1];
 error:
     port = ip_name(addr, remote, sizeof(remote));
-    logger_log(LOG_ERR, "Invalid udp packet from %s:%d", remote, port);
+    logger_log(LOG_ERR, "Invalid UDP packet from %s:%d", remote, port);
     if (verbose) {
         dump_hex(buf->base, nread, "Invalid udp Packet");
     }
@@ -106,7 +106,7 @@ error:
 static void
 inet_send_cb(uv_udp_send_t *req, int status) {
     if (status) {
-        logger_log(LOG_ERR, "[UDP] Tun to network failed: %s",
+        logger_log(LOG_ERR, "UDP send failed (%s)",
                    uv_strerror(status));
     }
     uv_buf_t *buf = (uv_buf_t *) (req + 1);
@@ -122,7 +122,7 @@ udp_send(struct tundev_context *ctx, uint8_t *buf, int len, struct sockaddr *add
     outbuf->len = len;
     int rc = uv_udp_send(write_req, &ctx->inet_udp, outbuf, 1, addr, inet_send_cb);
     if (rc) {
-        logger_log(LOG_ERR, "UDP Write error: %s", uv_strerror(rc));
+        logger_log(LOG_ERR, "UDP Write error (%s)", uv_strerror(rc));
         free(buf);
     }
 }

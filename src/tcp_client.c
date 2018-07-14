@@ -1,4 +1,6 @@
 #include <assert.h>
+#include <string.h>
+
 #include "uv.h"
 
 #include "common.h"
@@ -143,9 +145,13 @@ tcp_client_connect(struct tundev_context *ctx) {
     uv_tcp_init(ctx->timer_reconnect.loop, &ctx->inet_tcp.tcp);
 
     ctx->inet_tcp_fd = create_socket(SOCK_STREAM, 0);
+    if (ctx->inet_tcp_fd < 0) {
+        logger_stderr("Create socket - %s", strerror(errno));
+        return;
+    }
     if ((rc = uv_tcp_open(&ctx->inet_tcp.tcp, ctx->inet_tcp_fd))) {
-        logger_log(LOG_ERR, "tcp open error: %s", uv_strerror(rc));
-        exit(1);
+        logger_log(LOG_ERR, "TCP open - %s", uv_strerror(rc));
+        return;
     }
 
 #ifdef ANDROID

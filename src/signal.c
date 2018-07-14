@@ -55,7 +55,7 @@ signal_process(char *signal, const char *pidfile) {
 
     pid = get_pid(pidfile);
     if (pid == -1) {
-		logger_stderr("open \"%s\" failed (%d: %s)", pidfile, errno, strerror(errno));
+		logger_stderr("open \"%s\" (%d: %s)", pidfile, errno, strerror(errno));
         return 1;
     }
 

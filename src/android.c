@@ -132,8 +132,12 @@ new_query(int tunfd, struct iphdr *iphdr, struct udphdr *udphdr) {
 
     int rc;
     int fd = create_socket(SOCK_DGRAM, 0);
+    if (fd < 0) {
+        logger_log(LOG_ERR, "Create socket - %s", strerror(errno));
+        return NULL;
+    }
     if ((rc = uv_udp_open(&query->handle, fd))) {
-        logger_log(LOG_ERR, "UDP open error: %s", uv_strerror(rc));
+        logger_log(LOG_ERR, "UDP open - %s", uv_strerror(rc));
         free(query->timer);
         free(query);
         return NULL;

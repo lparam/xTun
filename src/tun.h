@@ -45,7 +45,7 @@ struct tundev_context {
     uv_timer_t      timer_keepalive;
     uv_timer_t      timer_reconnect;
     struct tundev  *tun;
-    struct          packet packet;  /* TCP client */
+    struct packet   packet;         /* TCP client */
     uint8_t        *network_buffer; /* UDP */
 };
 

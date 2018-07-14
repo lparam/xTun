@@ -147,6 +147,10 @@ udp_start(struct tundev_context *ctx, uv_loop_t *loop) {
     uv_udp_init(loop, &ctx->inet_udp);
 
     ctx->inet_udp_fd = create_socket(SOCK_DGRAM, mode == xTUN_SERVER ? 1 : 0);
+    if (ctx->inet_udp_fd < 0) {
+        logger_stderr("create socket error: %s", strerror(errno));
+        exit(1);
+    }
     if ((rc = uv_udp_open(&ctx->inet_udp, ctx->inet_udp_fd))) {
         logger_log(LOG_ERR, "UDP open error: %s", uv_strerror(rc));
         exit(1);

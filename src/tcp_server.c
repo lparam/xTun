@@ -136,10 +136,10 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
             peer->protocol= xTUN_TCP;
             peer->data = client;
             client->peer = peer;
+        }
 
-            if (check_incoming_packet(m, mlen) == 1) { // keepalive
-                return packet_reset(packet);
-            }
+        if (check_incoming_packet(m, mlen) == 1) { // keepalive
+            return packet_reset(packet);
         }
 
         tun_write(ctx->tunfd, m, mlen);
@@ -176,6 +176,7 @@ accept_cb(uv_stream_t *stream, int status) {
         uv_tcp_nodelay(&client->handle.tcp, 1);
         uv_tcp_keepalive(&client->handle.tcp, 1, 60);
         uv_read_start(&client->handle.stream, alloc_cb, recv_cb);
+        // TODO: register client handler
 
     } else {
         logger_log(LOG_ERR, "accept error: %s", uv_strerror(rc));
@@ -190,6 +191,10 @@ tcp_server_start(struct tundev_context *ctx, uv_loop_t *loop) {
     uv_tcp_init(loop, &ctx->inet_tcp.tcp);
 
     ctx->inet_tcp_fd = create_socket(SOCK_STREAM, 1);
+    if (ctx->inet_tcp_fd < 0) {
+        logger_stderr("create socket error: %s", strerror(errno));
+        exit(1);
+    }
     if ((rc = uv_tcp_open(&ctx->inet_tcp.tcp, ctx->inet_tcp_fd))) {
         logger_stderr("tcp open error: %s", uv_strerror(rc));
         exit(1);

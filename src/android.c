@@ -43,7 +43,7 @@ static void dns_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
 static void close_query(struct dns_query *query);
 static void handle_local_dns_answer(struct dns_query *query, uint8_t *buf,
                                     size_t len);
-void tun_write(int tunfd, uint8_t *buf, ssize_t len);
+int tun_write(int tunfd, uint8_t *buf, ssize_t len);
 
 
 static uint16_t

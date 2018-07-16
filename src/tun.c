@@ -32,7 +32,7 @@ static void loop_close(uv_loop_t *loop);
 static void signal_cb(uv_signal_t *handle, int signum);
 static void signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data);
 
-void
+int
 tun_write(int tunfd, uint8_t *buf, ssize_t len) {
     uint8_t *pos = buf;
     size_t remaining = len;
@@ -40,7 +40,7 @@ tun_write(int tunfd, uint8_t *buf, ssize_t len) {
         ssize_t sz = write(tunfd, pos, remaining);
         if(sz == -1) {
             if(errno != EAGAIN && errno != EWOULDBLOCK) {
-                break;
+                return -1;
             } else {
                 continue;
             }
@@ -48,6 +48,7 @@ tun_write(int tunfd, uint8_t *buf, ssize_t len) {
         pos += sz;
         remaining -= sz;
     }
+    return 0;
 }
 
 static void
@@ -83,6 +84,7 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
     ctx = container_of(watcher, struct tundev_context, watcher);
     tun = ctx->tun;
 
+    // TODO: Use output buffer
     tunbuf = malloc(PRIMITIVE_BYTES + tun->mtu);
     m = tunbuf + PRIMITIVE_BYTES;
 
@@ -235,11 +237,10 @@ void
 tun_free(struct tundev *tun) {
     for (int i = 0; i < tun->queues; i++) {
         if (mode == xTUN_SERVER) {
-            free(tun->contexts[i].packet.buf);
+            // free(tun->contexts[i].packet.buf);
             free(tun->contexts[i].network_buffer);
         } else {
             if (protocol == xTUN_TCP) {
-                free(tun->contexts[i].packet.buf);
             } else {
                 free(tun->contexts[i].network_buffer);
             }

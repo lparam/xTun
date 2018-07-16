@@ -86,12 +86,13 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
         }
         peer->protocol = xTUN_UDP;
 
-        if (check_incoming_packet(m, mlen) == 1) { // keepalive
+        if (is_keepalive_packet(m, mlen) == 1) { // keepalive
             return;
         }
     }
 
-    return tun_write(ctx->tunfd, m, mlen);
+    tun_write(ctx->tunfd, m, mlen);
+    return;
 
     int port = 0;
     char remote[INET_ADDRSTRLEN + 1];

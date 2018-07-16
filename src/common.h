@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include "tun.h"
 
-int check_incoming_packet(uint8_t *buf, ssize_t len);
+int is_keepalive_packet(uint8_t *buf, ssize_t len);
 void construct_keepalive_packet(struct tundev *tun, uint8_t *buf);
 
 #ifdef ANDROID

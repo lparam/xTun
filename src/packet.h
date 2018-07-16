@@ -14,16 +14,19 @@
 #define PACKET_INVALID    1
 #define PACKET_COMPLETED  2
 
-struct packet {
-    int read;
-    uint16_t offset;
-    uint16_t size;
-    uint16_t max;
-    uint8_t *buf;
-};
+#define PACKET_BUFFER_SIZE (64 * 1024)
 
-void packet_alloc(struct packet *packet, uv_buf_t *buf);
-int packet_filter(struct packet *packet, const char *buf, ssize_t buflen);
-void packet_reset(struct packet *packet);
+typedef struct {
+    int off;
+    int len;
+    uint8_t data[PACKET_BUFFER_SIZE];
+} buffer_t;
+
+typedef struct packet {
+    uint16_t size;
+    uint8_t *buf;
+} packet_t;
+
+int packet_parse(buffer_t *buf, struct packet *packet);
 
 #endif // for #ifndef PACKET_H

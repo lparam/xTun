@@ -45,8 +45,9 @@ struct tundev_context {
     uv_timer_t      timer_keepalive;
     uv_timer_t      timer_reconnect;
     struct tundev  *tun;
-    struct packet   packet;         /* TCP client */
+    // TODO: move to client context
     uint8_t        *network_buffer; /* UDP */
+    buffer_t        recv_buffer;
 };
 
 struct tundev {
@@ -74,6 +75,6 @@ int verbose;
 int protocol;
 uint8_t mode;
 
-void tun_write(int tunfd, uint8_t *buf, ssize_t len);
+int tun_write(int tunfd, uint8_t *buf, ssize_t len);
 
 #endif // for #ifndef TUN_H

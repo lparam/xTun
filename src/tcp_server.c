@@ -20,7 +20,7 @@ struct client_context {
         uv_stream_t stream;
     } handle;
     struct sockaddr addr;
-    struct packet packet;
+    buffer_t recv_buffer;
     struct peer *peer;
 };
 
@@ -29,15 +29,12 @@ static struct client_context *
 new_client(int mtu) {
     struct client_context *client = malloc(sizeof(*client));
     memset(client, 0, sizeof(*client));
-    client->packet.buf = malloc(PRIMITIVE_BYTES + mtu);
-    client->packet.max = PRIMITIVE_BYTES + mtu;
-    packet_reset(&client->packet);
+    memset(&client->recv_buffer, 0, sizeof client->recv_buffer);
     return client;
 }
 
 static void
 free_client(struct client_context *client) {
-    free(client->packet.buf);
     free(client);
 }
 
@@ -63,7 +60,6 @@ handle_invalid_packet(struct client_context *client) {
     char remote[INET_ADDRSTRLEN + 1];
     port = ip_name(&client->addr, remote, sizeof(remote));
     logger_log(LOG_ERR, "Invalid tcp packet from %s:%d", remote, port);
-    packet_reset(&client->packet);
     close_client(client);
 }
 
@@ -71,7 +67,8 @@ static void
 alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
     struct client_context *client = container_of(handle, struct client_context,
                                                  handle);
-    packet_alloc(&client->packet, buf);
+    buf->base = (char *)client->recv_buffer.data + client->recv_buffer.len;
+    buf->len = sizeof(client->recv_buffer.data) - client->recv_buffer.len;
 }
 
 static void
@@ -81,74 +78,83 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 
     ctx = stream->data;
     client = container_of(stream, struct client_context, handle.stream);
-    struct packet *packet = &client->packet;
 
     if (nread > 0) {
-        int rc = packet_filter(packet, buf->base, nread);
-        if (rc == PACKET_UNCOMPLETE) {
-            return;
-        } else if (rc == PACKET_INVALID) {
-            goto error;
-        }
-
-        int clen = packet->size;
-        int mlen = packet->size - PRIMITIVE_BYTES;
-        uint8_t *c = packet->buf, *m = packet->buf;
-
-        assert(mlen > 0 && mlen <= ctx->tun->mtu);
-
-        int err = crypto_decrypt(m, c, clen);
-        if (err) {
-            goto error;
-        }
-
-        struct iphdr *iphdr = (struct iphdr *) m;
-
-        in_addr_t client_network = iphdr->saddr & htonl(ctx->tun->netmask);
-        if (client_network != ctx->tun->network) {
-            char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
-            logger_log(LOG_ERR, "Invalid client: %s", a);
-            close_client(client);
-            return;
-        }
-
-        if (client->peer == NULL) {
-            uv_rwlock_rdlock(&rwlock);
-            struct peer *peer = lookup_peer(iphdr->saddr, peers);
-            uv_rwlock_rdunlock(&rwlock);
-            if (peer == NULL) {
-                char saddr[24] = {0}, daddr[24] = {0};
-                parse_addr(iphdr, saddr, daddr);
-                logger_log(LOG_NOTICE, "[TCP] Cache miss: %s -> %s",
-                           saddr, daddr);
-
-                uv_rwlock_wrlock(&rwlock);
-                peer = save_peer(iphdr->saddr, &client->addr, peers);
-                uv_rwlock_wrunlock(&rwlock);
-
-            } else {
-                if (peer->data) {
-                    struct client_context *old = peer->data;
-                    close_client(old);
-                }
+        client->recv_buffer.len += nread;
+        for (;;) {
+            packet_t packet;
+            int rc = packet_parse(&client->recv_buffer, &packet);
+            if (rc == PACKET_UNCOMPLETE) {
+                return;
+            } else if (rc == PACKET_INVALID) {
+                goto error;
             }
 
-            peer->protocol= xTUN_TCP;
-            peer->data = client;
-            client->peer = peer;
-        }
+            int clen = packet.size;
+            int mlen = packet.size - PRIMITIVE_BYTES;
+            uint8_t *c = packet.buf, *m = packet.buf;
 
-        if (check_incoming_packet(m, mlen) == 1) { // keepalive
-            return packet_reset(packet);
-        }
+            assert(mlen > 0 && mlen <= ctx->tun->mtu);
 
-        tun_write(ctx->tunfd, m, mlen);
-        packet_reset(packet);
+            int err = crypto_decrypt(m, c, clen);
+            if (err) {
+                goto error;
+            }
+
+            struct iphdr *iphdr = (struct iphdr *) m;
+
+            in_addr_t client_network = iphdr->saddr & htonl(ctx->tun->netmask);
+            if (client_network != ctx->tun->network) {
+                char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
+                logger_log(LOG_ERR, "Invalid client: %s", a);
+                close_client(client);
+                return;
+            }
+
+            if (client->peer == NULL) {
+                uv_rwlock_rdlock(&rwlock);
+                struct peer *peer = lookup_peer(iphdr->saddr, peers);
+                uv_rwlock_rdunlock(&rwlock);
+                if (peer == NULL) {
+                    char saddr[24] = {0}, daddr[24] = {0};
+                    parse_addr(iphdr, saddr, daddr);
+                    logger_log(LOG_NOTICE, "[TCP] Cache miss: %s -> %s",
+                            saddr, daddr);
+
+                    uv_rwlock_wrlock(&rwlock);
+                    peer = save_peer(iphdr->saddr, &client->addr, peers);
+                    uv_rwlock_wrunlock(&rwlock);
+
+                } else {
+                    if (peer->data) {
+                        struct client_context *old = peer->data;
+                        close_client(old);
+                    }
+                }
+
+                peer->protocol= xTUN_TCP;
+                peer->data = client;
+                client->peer = peer;
+            }
+
+            if (is_keepalive_packet(m, mlen) != 1) { // keepalive
+                tun_write(ctx->tunfd, m, mlen);
+            }
+
+            int remain = client->recv_buffer.len - client->recv_buffer.off;
+            assert(remain >= 0);
+            if (remain > 0) {
+                memmove(client->recv_buffer.data,
+                        client->recv_buffer.data + client->recv_buffer.off, remain);
+            }
+            client->recv_buffer.len = remain;
+            client->recv_buffer.off = 0;
+        }
 
     } else if (nread < 0) {
         if (nread != UV_EOF) {
-            logger_log(LOG_ERR, "Receive from client failed: %s",
-                       uv_strerror(nread));
+            logger_log(LOG_ERR, "Receive from client failed (%d: %s)",
+                       nread, uv_strerror(nread));
         }
         close_client(client);
     }
@@ -192,24 +198,24 @@ tcp_server_start(struct tundev_context *ctx, uv_loop_t *loop) {
 
     ctx->inet_tcp_fd = create_socket(SOCK_STREAM, 1);
     if (ctx->inet_tcp_fd < 0) {
-        logger_stderr("create socket error: %s", strerror(errno));
+        logger_stderr("create socket error (%d: %s)", errno, strerror(errno));
         exit(1);
     }
     if ((rc = uv_tcp_open(&ctx->inet_tcp.tcp, ctx->inet_tcp_fd))) {
-        logger_stderr("tcp open error: %s", uv_strerror(rc));
+        logger_stderr("tcp open error (%d: %s)", rc, uv_strerror(rc));
         exit(1);
     }
 
     uv_tcp_bind(&ctx->inet_tcp.tcp, &ctx->tun->addr, 0);
     if (rc) {
-        logger_stderr("tcp bind error: %s", uv_strerror(rc));
+        logger_stderr("tcp bind error (%d: %s)", rc, uv_strerror(rc));
         exit(1);
     }
 
     ctx->inet_tcp.tcp.data = ctx;
     rc = uv_listen(&ctx->inet_tcp.stream, 128, accept_cb);
     if (rc) {
-        logger_stderr("tcp listen error: %s", uv_strerror(rc));
+        logger_stderr("tcp listen error (%d: %s)", rc, uv_strerror(rc));
         exit(1);
     }
     return rc;

@@ -14,15 +14,15 @@ hash_peer(uint32_t addr) {
 	return (a + b + c) % HASHSIZE;
 }
 
-struct peer *
-lookup_peer(uint32_t addr, struct peer **peers) {
+peer_t *
+lookup_peer(uint32_t addr, peer_t **peers) {
 	int h = hash_peer(addr);
-	struct peer *p = peers[h];
+	peer_t *p = peers[h];
 	if (p == NULL)
 		return NULL;
 	if (p->tun_addr.s_addr == addr)
 		return p;
-	struct peer *last = p;
+	peer_t *last = p;
 	while (last->next) {
 		p = last->next;
         if (p->tun_addr.s_addr == addr)
@@ -32,11 +32,10 @@ lookup_peer(uint32_t addr, struct peer **peers) {
 	return NULL;
 }
 
-struct peer *
-save_peer(uint32_t tun_addr, struct sockaddr *remote_addr, struct peer **peers)
-{
+peer_t *
+save_peer(uint32_t tun_addr, struct sockaddr *remote_addr, peer_t **peers) {
 	int h = hash_peer(tun_addr);
-	struct peer *p = malloc(sizeof(struct peer));
+	peer_t *p = malloc(sizeof(peer_t));
 	memset(p, 0, sizeof(*p));
     p->tun_addr.s_addr = tun_addr;
     p->remote_addr = *remote_addr;
@@ -46,9 +45,9 @@ save_peer(uint32_t tun_addr, struct sockaddr *remote_addr, struct peer **peers)
 }
 
 void
-destroy_peers(struct peer **peers) {
+destroy_peers(peer_t **peers) {
 	for (int i = 0; i < HASHSIZE; i++) {
-        struct peer *p = peers[i];
+        peer_t *p = peers[i];
         while (p) {
             void *tmp = p;
             p = p->next;
@@ -59,7 +58,7 @@ destroy_peers(struct peer **peers) {
 }
 
 void
-init_peers(struct peer **peers) {
+init_peers(peer_t **peers) {
     for (int i = 0; i < HASHSIZE; i++) {
         peers[i] = NULL;
     }

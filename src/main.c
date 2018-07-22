@@ -18,7 +18,7 @@
 
 static int mtu = MTU;
 static int port = 1082;
-static int keepalive = 0;
+static int keepalive_interval = 0;
 static int daemon_mode = 1;
 static uint32_t parallel = 1;
 static char *iface = "tun0";
@@ -145,7 +145,7 @@ parse_opts(int argc, char *argv[]) {
             }
             break;
         case GETOPT_KEEPALIVE:
-            keepalive = strtol(optarg, NULL, 10);
+            keepalive_interval = strtol(optarg, NULL, 10);
             break;
         case GETOPT_PID:
             pidfile = optarg;
@@ -178,7 +178,7 @@ init() {
     signal(SIGABRT, SIG_IGN);
 
     if (crypto_init(password)) {
-        logger_stderr("crypto init failed");
+        logger_stderr("Crypto init failed");
         exit(1);
     }
 
@@ -224,7 +224,7 @@ main(int argc, char *argv[]) {
     struct sockaddr addr;
     int rc = resolve_addr(addrbuf, port, &addr);
     if (rc) {
-        logger_stderr("invalid address");
+        logger_stderr("Invalid address");
         return 1;
     }
 
@@ -233,11 +233,11 @@ main(int argc, char *argv[]) {
         return 1;
     }
 
-    tun_config(tun, ifconf, mtu, &addr);
-    if (keepalive) {
-        tun_keepalive(tun, 1, keepalive);
+    tun_config(tun, ifconf, mtu);
+    if (keepalive_interval) {
+        tun_keepalive(tun, 1, keepalive_interval);
     }
-    tun_start(tun);
+    tun_run(tun, addr);
 
     tun_free(tun);
     if (daemon_mode) {

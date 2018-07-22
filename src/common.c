@@ -17,6 +17,6 @@ construct_keepalive_packet(struct tundev *tun, uint8_t *buf) {
     // TODO: Set the first 9 bytes to "keepalive"
     // memcpy(buf, "keepalive", 9);
     struct iphdr *iphdr = (struct iphdr *)buf;
-    iphdr->saddr = tun->s_addr;
+    iphdr->saddr = tun->addr;
     iphdr->daddr = tun->network;
 }

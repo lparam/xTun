@@ -16,6 +16,8 @@
    1492 (Ethernet) - 20 (IPv4, or 40 for IPv6) - 20 (TCP) - 26 (xTun) */
 #define MTU 1426
 
+#define XTUN_MAX_MTU    10000
+
 #define HASHSIZE 256
 
 #define xTUN_CLIENT		0x01
@@ -31,6 +33,10 @@ typedef struct tundev_context {
     udp_t           *udp;
     tcp_server_t    *tcp_server;
     tcp_client_t    *tcp_client;
+
+    // TODO: Add buffer
+    // buffer_t buffer;
+    // int ready;
 
     int             tunfd;
     struct tundev  *tun;

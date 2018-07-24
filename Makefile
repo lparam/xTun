@@ -124,6 +124,7 @@ $(XTUN): \
 	$(OBJTREE)/src/logger.o \
 	$(OBJTREE)/src/daemon.o \
 	$(OBJTREE)/src/signal.o \
+	$(OBJTREE)/src/buffer.o \
 	$(OBJTREE)/src/crypto.o \
 	$(OBJTREE)/src/peer.o \
 	$(OBJTREE)/src/packet.o \
@@ -139,6 +140,7 @@ $(XTUN_STATIC): \
 	$(OBJTREE)/src/util.o \
 	$(OBJTREE)/src/common.o \
 	$(OBJTREE)/src/logger.o \
+	$(OBJTREE)/src/buffer.o \
 	$(OBJTREE)/src/crypto.o \
 	$(OBJTREE)/src/checksum.o \
 	$(OBJTREE)/src/android.o \
@@ -149,7 +151,7 @@ $(XTUN_STATIC): \
 	$(OBJTREE)/src/tcp_server.o \
 	$(OBJTREE)/src/udp.o \
 	$(OBJTREE)/src/tun.o
-	$(BUILD_AR) rcu $@ $^
+	$(BUILD_AR) rc $@ $^
 	$(BUILD_RANLIB) $@
 
 clean:

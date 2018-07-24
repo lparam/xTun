@@ -31,15 +31,17 @@ typedef struct udp {
     int inet_udp_fd;
     uv_udp_t inet_udp;
     uv_timer_t timer_keepalive;
-    uint8_t *recv_buffer;
+    buffer_t recv_buffer;
     tundev_context_t *tun_ctx;
+    cipher_ctx_t *cipher;
 } udp_t;
 
 udp_t *
 udp_new(tundev_context_t *ctx, struct sockaddr *addr) {
     udp_t *udp = malloc(sizeof *udp);
     memset(udp, 0, sizeof *udp);
-    udp->recv_buffer = malloc(ctx->tun->mtu + PRIMITIVE_BYTES);
+    udp->cipher = cipher_new();
+    buffer_alloc(&udp->recv_buffer, PACKET_BUFFER_SIZE);
     udp->addr = addr;
     udp->tun_ctx = ctx;
     udp->keepalive_interval = ctx->tun->keepalive_interval;
@@ -48,19 +50,16 @@ udp_new(tundev_context_t *ctx, struct sockaddr *addr) {
 
 void
 udp_free(udp_t *udp) {
+    cipher_free(udp->cipher);
+    buffer_free(&udp->recv_buffer);
     free(udp);
-}
-
-void
-udp_associate(void *data) {
-
 }
 
 static void
 inet_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
     udp_t *udp = container_of(handle, udp_t, inet_udp);
-    buf->base = (char *) udp->recv_buffer;
-    buf->len = udp->tun_ctx->tun->mtu + PRIMITIVE_BYTES;
+    buf->base = (char *)udp->recv_buffer.data;
+    buf->len = udp->recv_buffer.capacity;
 }
 
 static void
@@ -72,22 +71,14 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
     }
 
     udp_t *udp = container_of(handle, udp_t, inet_udp);
-
-    uint8_t *m = (uint8_t *)buf->base;
-    ssize_t mlen = nread - PRIMITIVE_BYTES;
-
-    int valid = mlen > 0 && mlen <= udp->tun_ctx->tun->mtu;
-    if (!valid) {
-        goto error;
-    }
-
-    int rc = crypto_decrypt(m, (uint8_t *)buf->base, nread);
+    udp->recv_buffer.len = nread;
+    int rc = crypto_decrypt_with_new_salt(&udp->recv_buffer, udp->cipher);
     if (rc) {
         goto error;
     }
 
     if (mode == xTUN_SERVER) {
-        struct iphdr *iphdr = (struct iphdr *) m;
+        struct iphdr *iphdr = (struct iphdr *) udp->recv_buffer.data;
 
         in_addr_t client_network = iphdr->saddr & htonl(udp->tun_ctx->tun->netmask);
         if (client_network != udp->tun_ctx->tun->network) {
@@ -114,12 +105,12 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
         }
         peer->protocol = xTUN_UDP;
 
-        if (is_keepalive_packet(m, mlen) == 1) { // keepalive
+        if (is_keepalive_packet(&udp->recv_buffer) == 1) { // keepalive
             return;
         }
     }
 
-    tun_write(udp->tun_ctx->tunfd, m, mlen);
+    tun_write(udp->tun_ctx->tunfd, udp->recv_buffer.data, udp->recv_buffer.len);
     return;
 
     int port = 0;
@@ -128,7 +119,7 @@ error:
     port = ip_name(addr, remote, sizeof(remote));
     logger_log(LOG_ERR, "Invalid UDP packet from %s:%d", remote, port);
     if (verbose) {
-        dump_hex(buf->base, nread, "Invalid udp Packet");
+        dump_hex(udp->recv_buffer.data, udp->recv_buffer.len, "Invalid udp Packet");
     }
 }
 
@@ -139,32 +130,41 @@ inet_send_cb(uv_udp_send_t *req, int status) {
                    status, uv_strerror(status));
     }
     uv_buf_t *buf = (uv_buf_t *) (req + 1);
-    free(buf->base);
+    // printf("%s - buf: %p - %p\n", __func__, buf, buf->base);
+    buffer_t *buffer = container_of(&buf->base, buffer_t, data);
+    // printf("%s - buffer: %p - %p\n", __func__, buffer, buffer->data);
+    buffer_free(buffer);
     free(req);
 }
 
 void
-udp_send(udp_t *udp, uint8_t *buf, int len, struct sockaddr *addr) {
+udp_send(udp_t *udp, buffer_t *buf, struct sockaddr *addr) {
+    // dump_hex(buf->data, buf->len, "udp 0");
+    crypto_encrypt_with_new_salt(buf, udp->cipher);
+    // dump_hex(buf->data, buf->len, "udp 1");
     uv_udp_send_t *write_req = malloc(sizeof(*write_req) + sizeof(uv_buf_t));
     uv_buf_t *outbuf = (uv_buf_t *) (write_req + 1);
-    outbuf->base = (char *) buf;
-    outbuf->len = len;
+    outbuf->base = (char *) buf->data;
+    outbuf->len = buf->len;
+    // printf("%s - buf: %p - %p\n", __func__, outbuf, outbuf->base);
+    // printf("%s - buffer: %p - %p\n", __func__, buf, buf->data);
     int rc = uv_udp_send(write_req, &udp->inet_udp, outbuf, 1,
                          mode == xTUN_SERVER ? addr : udp->addr, inet_send_cb);
     if (rc) {
         logger_log(LOG_ERR, "UDP Write error (%d: %s)", rc, uv_strerror(rc));
-        free(buf);
+        buffer_free(buf);
     }
 }
 
 static void
 keepalive(uv_timer_t *handle) {
     udp_t *udp = container_of(handle, udp_t, timer_keepalive);
-    size_t len = sizeof(struct iphdr) + PRIMITIVE_BYTES + 1;
-    uint8_t *buf = calloc(1, len);
-    construct_keepalive_packet(udp->tun_ctx->tun, buf + PRIMITIVE_BYTES);
-    crypto_encrypt(buf, buf + PRIMITIVE_BYTES, len - PRIMITIVE_BYTES);
-    udp_send(udp, buf, len, NULL);
+    size_t len = sizeof(struct iphdr) + 1;
+    buffer_t buf;
+    buffer_alloc(&buf, len);
+    buf.len = len;
+    construct_keepalive_packet(udp->tun_ctx->tun, buf.data);
+    udp_send(udp, &buf, NULL);
 }
 
 int
@@ -209,8 +209,7 @@ udp_start(udp_t *udp, uv_loop_t *loop) {
 
 static void
 close_cb(uv_handle_t *handle) {
-    udp_t *udp = container_of(handle, udp_t, inet_udp);
-    free(udp->recv_buffer);
+    // udp_t *udp = container_of(handle, udp_t, inet_udp);
 }
 
 void

@@ -36,6 +36,8 @@ typedef struct tcp_client {
     uv_timer_t timer_keepalive;
     uv_timer_t timer_reconnect;
     buffer_t recv_buffer;
+    cipher_ctx_t *cipher_e;
+    cipher_ctx_t *cipher_d;
     tundev_context_t *tun_ctx;
 } tcp_client_t;
 
@@ -43,6 +45,9 @@ tcp_client_t *
 tcp_client_new(tundev_context_t *ctx, struct sockaddr *addr) {
     tcp_client_t *c = malloc(sizeof *c);
     memset(c, 0, sizeof *c);
+    buffer_alloc(&c->recv_buffer, ctx->tun->mtu + CRYPTO_MAX_OVERHEAD);
+    c->cipher_e = cipher_new();
+    c->cipher_d = cipher_new();
     c->connect_interval = 5;
     c->tun_ctx = ctx;
     c->server_addr = addr;
@@ -52,6 +57,9 @@ tcp_client_new(tundev_context_t *ctx, struct sockaddr *addr) {
 
 void
 tcp_client_free(tcp_client_t *c) {
+    cipher_free(c->cipher_e);
+    cipher_free(c->cipher_d);
+    buffer_free(&c->recv_buffer);
     free(c);
 }
 
@@ -84,7 +92,7 @@ static void
 alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
     tcp_client_t *c = container_of(handle, tcp_client_t, inet_tcp.handle);
     buf->base = (char *)c->recv_buffer.data + c->recv_buffer.len;
-    buf->len = sizeof(c->recv_buffer.data) - c->recv_buffer.len;
+    buf->len = c->recv_buffer.capacity - c->recv_buffer.len;
 }
 
 static void
@@ -94,26 +102,17 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     if (nread > 0) {
         client->recv_buffer.len += nread;
         for (;;) {
-            packet_t packet;
-            int rc = packet_parse(&client->recv_buffer, &packet);
+            packet_t packet = {
+                .size = 0,
+            };
+            int rc = packet_parse(&client->recv_buffer, &packet, client->cipher_d);
             if (rc == PACKET_UNCOMPLETE) {
                 return;
             } else if (rc == PACKET_INVALID) {
                 goto error;
             }
 
-            int clen = packet.size;
-            int mlen = packet.size - PRIMITIVE_BYTES;
-            uint8_t *c = packet.buf, *m = packet.buf;
-
-            assert(mlen > 0 && mlen <= client->tun_ctx->tun->mtu);
-
-            int err = crypto_decrypt(m, c, clen);
-            if (err) {
-                goto error;
-            }
-
-            tun_write(client->tun_ctx->tunfd, m, mlen);
+            tun_write(client->tun_ctx->tunfd, packet.buf, packet.size);
 
             int remain = client->recv_buffer.len - client->recv_buffer.off;
             assert(remain >= 0);
@@ -158,11 +157,12 @@ keepalive(uv_timer_t *handle) {
         }
         return;
     }
-    size_t len = sizeof(struct iphdr) + PRIMITIVE_BYTES + 1;
-    uint8_t *buf = calloc(1, len);
-    construct_keepalive_packet(c->tun_ctx->tun, buf + PRIMITIVE_BYTES);
-    crypto_encrypt(buf, buf + PRIMITIVE_BYTES, len - PRIMITIVE_BYTES);
-    tcp_send(&c->inet_tcp.stream, buf, len);
+    size_t len = sizeof(struct iphdr) + 1;
+    buffer_t buf;
+    buffer_alloc(&buf, len);
+    buf.len = len;
+    construct_keepalive_packet(c->tun_ctx->tun, buf.data);
+    tcp_send(&c->inet_tcp.stream, &buf, c->cipher_e);
 }
 
 static void
@@ -172,6 +172,10 @@ connect_cb(uv_connect_t *req, int status) {
         c->connect_interval = 5;
         c->status = CONNECTED;
         uv_timer_stop(&c->timer_reconnect);
+        cipher_reset(c->cipher_e);
+        cipher_reset(c->cipher_d);
+        c->recv_buffer.off = 0;
+        c->recv_buffer.len = 0;
         tcp_client_recv(c);
     } else {
         if (status != UV_ECANCELED) {
@@ -243,13 +247,14 @@ tcp_client_stop(tcp_client_t *c) {
 }
 
 void
-tcp_client_send(tcp_client_t *c, uint8_t *buf, int len) {
-    tcp_send(&c->inet_tcp.stream, buf, len);
+tcp_client_send(tcp_client_t *c, buffer_t *buf) {
+    tcp_send(&c->inet_tcp.stream, buf, c->cipher_e);
 }
 
 int tcp_client_connected(tcp_client_t *t) {
     return t->status == CONNECTED;
 }
+
 int tcp_client_disconnected(tcp_client_t *t) {
     return t->status == DISCONNECTED;
 }

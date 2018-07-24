@@ -1,94 +1,175 @@
 #include <string.h>
+#include <assert.h>
 #include "sodium.h"
-
+#include "crypto.h"
+#include "buffer.h"
+#include "util.h"
 
 /*
  *
- * Cipher Text
- * +------+-----+----------+
- * |NONCE | MAC |  DATA    |
- * +------+-----+----------+
- * |  8   | 16  | Variable |
- * +------+-----+----------+
+ * TCP Cipher Text
+ * +--------+------------+-----------+-------------+
+ * | length | length mac |  payload  | payload mac |
+ * +--------+------------+-----------+-------------+
+ * |   2    |     16     |  Variable |      16     |
+ * +--------+------------+-----------+-------------+
  *
  */
 
-#define COB crypto_onetimeauth_BYTES // 16U
-#define COKB crypto_onetimeauth_KEYBYTES // 32U
-#define CSSNB crypto_stream_salsa20_NONCEBYTES // 8U
-#define CSSKB crypto_stream_salsa20_KEYBYTES // 32U
+/*
+ *
+ * UDP Cipher Text
+ * +------------+-----------+-------------+
+ * |    salt    |  payload  | payload mac |
+ * +------------+-----------+-------------+
+ * |     8      |  Variable |      16     |
+ * +------------+-----------+-------------+
+ *
+ */
 
-static uint8_t secret_key[crypto_generichash_BYTES]; // 32U
+#define SALT_LENGTH 8
 
+typedef struct cipher_ctx {
+    uint32_t init;
+    uint8_t salt[SALT_LENGTH];
+    uint8_t key[crypto_aead_chacha20poly1305_ietf_KEYBYTES];
+    uint8_t nonce[crypto_aead_chacha20poly1305_IETF_NPUBBYTES];
+} cipher_ctx_t;
+
+#define SUBKEY_CONTEXT "xTun-subkey"
+
+#if !(crypto_kdf_KEYBYTES >= crypto_generichash_BYTES_MIN && crypto_kdf_KEYBYTES <= crypto_generichash_BYTES_MAX)
+#error "invalid generichash key bytes"
+#endif
+
+static uint8_t master_key[crypto_kdf_KEYBYTES];
+
+cipher_ctx_t *
+cipher_new() {
+    struct cipher_ctx *ctx = malloc(sizeof *ctx);
+    sodium_memzero(ctx, sizeof(*ctx));
+    return ctx;
+}
+
+void
+cipher_free(cipher_ctx_t *ctx) {
+    free(ctx);
+}
+
+void
+cipher_reset(cipher_ctx_t *ctx) {
+    sodium_memzero(ctx, sizeof(*ctx));
+}
+
+size_t
+cipher_overhead(cipher_ctx_t *ctx) {
+    if (ctx->init) {
+        return crypto_aead_chacha20poly1305_ietf_ABYTES;
+    }
+    return SALT_LENGTH + crypto_aead_chacha20poly1305_ietf_ABYTES;
+}
 
 static int
-salsa208poly1305_encrypt(uint8_t *c, const uint8_t *m, const uint32_t mlen,
-                         const uint8_t *n, const uint8_t *k)
-{
-    uint8_t cok[COKB];
+cipher_ctx_derive_key(cipher_ctx_t *ctx) {
+    uint64_t id = (uint64_t)(ctx->salt[0]) |
+                  (uint64_t)(ctx->salt[1]) << 8 |
+                  (uint64_t)(ctx->salt[2]) << 16 |
+                  (uint64_t)(ctx->salt[3]) << 24 |
+                  (uint64_t)(ctx->salt[4]) << 32 |
+                  (uint64_t)(ctx->salt[5]) << 40 |
+                  (uint64_t)(ctx->salt[6]) << 48 |
+                  (uint64_t)(ctx->salt[7]) << 56;
+    return crypto_kdf_derive_from_key(ctx->key, sizeof ctx->key, id,
+                                      SUBKEY_CONTEXT, master_key);
+}
 
-    crypto_stream_salsa208(cok, COKB, n, k);
-    crypto_stream_salsa208_xor(c + COB, m, mlen, n, k);
-    crypto_onetimeauth_poly1305(c, c + COB, mlen, cok);
+static int
+encrypt(buffer_t *plaintext, cipher_ctx_t *ctx, int reset) {
+    size_t salt_off = 0;
+
+    if (!ctx->init || reset) {
+        salt_off = SALT_LENGTH;
+    }
+
+    size_t clen = salt_off + plaintext->len + crypto_aead_chacha20poly1305_IETF_ABYTES;
+    uint8_t ciphertext[clen];
+
+    if (!ctx->init || reset) {
+        randombytes_buf(ctx->salt, SALT_LENGTH);
+        memcpy(ciphertext, ctx->salt, SALT_LENGTH);
+        memset(ctx->nonce, 0, sizeof ctx->nonce);
+        cipher_ctx_derive_key(ctx);
+        ctx->init = 1;
+    }
+
+    unsigned long long long_clen = 0;
+    int rc = crypto_aead_chacha20poly1305_ietf_encrypt(ciphertext + salt_off, &long_clen,
+                                                       plaintext->data, plaintext->len, NULL, 0, NULL,
+                                                       ctx->nonce, ctx->key);
+    assert(long_clen == clen - salt_off);
+    sodium_increment(ctx->nonce, sizeof ctx->nonce);
+
+    buffer_realloc(plaintext, clen, clen);
+    memcpy(plaintext->data, ciphertext, clen);
+    plaintext->len = clen;
+
+    return rc;
+}
+
+static int
+decrypt(buffer_t *ciphertext, cipher_ctx_t *ctx, int reset) {
+    size_t salt_off = 0;
+
+    if (!ctx->init || reset) {
+        // TODO: Add the salt to bloom filter
+        memcpy(ctx->salt, ciphertext->data, SALT_LENGTH);
+        memset(ctx->nonce, 0, sizeof ctx->nonce);
+        cipher_ctx_derive_key(ctx);
+        salt_off = SALT_LENGTH;
+        ctx->init = 1;
+    }
+
+    size_t mlen = ciphertext->len - salt_off - crypto_aead_chacha20poly1305_IETF_ABYTES;
+
+    unsigned long long long_mlen = 0;
+    int rc = crypto_aead_chacha20poly1305_ietf_decrypt(ciphertext->data, &long_mlen, NULL,
+                                                       ciphertext->data + salt_off, ciphertext->len - salt_off, NULL, 0,
+                                                       ctx->nonce, ctx->key);
+    if (rc) {
+        return -1;
+    }
+
+    assert(long_mlen == mlen);
+    sodium_increment(ctx->nonce, sizeof ctx->nonce);
+
+    ciphertext->len = mlen;
 
     return 0;
 }
 
-static int
-salsa208poly1305_decrypt(uint8_t *m, const uint8_t *c, const uint32_t clen,
-                         const uint8_t *n, const uint8_t *k)
-{
-    uint8_t cok[COKB];
-
-    if (clen < COB) {
-        return -1;
-    }
-
-    int mlen = clen - COB;
-
-    crypto_stream_salsa208(cok, COKB, n, k);
-    if (crypto_onetimeauth_poly1305_verify(c, c + COB, mlen, cok) == 0) {
-        return crypto_stream_salsa208_xor(m, c + COB, mlen, n, k);
-    }
-
-    return -1;
-}
-
 int
 crypto_init(const char *password) {
-    if (sodium_init() == -1) {
-        return 1;
-    }
-
-    randombytes_set_implementation(&randombytes_salsa20_implementation);
-    randombytes_stir();
-
-    return crypto_generichash(secret_key, sizeof secret_key,
+    return crypto_generichash(master_key, sizeof master_key,
                               (uint8_t*)password, strlen(password), NULL, 0);
+
 }
 
 int
-crypto_generickey(uint8_t *out, size_t outlen, uint8_t *in, size_t inlen,
-                  uint8_t *key, size_t keylen)
-{
-    return crypto_generichash(out, outlen, in, inlen, key, keylen);
+crypto_encrypt(buffer_t *plaintext, cipher_ctx_t *ctx) {
+    return encrypt(plaintext, ctx, 0);
 }
 
 int
-crypto_encrypt(uint8_t *c, const uint8_t *m, const uint32_t mlen) {
-    uint8_t nonce[CSSNB];
-    randombytes_buf(nonce, CSSNB);
-    memcpy(c, nonce, CSSNB);
-    return salsa208poly1305_encrypt(c + CSSNB, m, mlen, nonce, secret_key);
+crypto_decrypt(buffer_t *ciphertext, cipher_ctx_t *ctx) {
+    return decrypt(ciphertext, ctx, 0);
 }
 
 int
-crypto_decrypt(uint8_t *m, const uint8_t *c, const uint32_t clen) {
-    uint8_t nonce[CSSNB];
-    if (clen <= CSSNB + COB) {
-        return -1;
-    }
-    memcpy(nonce, c, CSSNB);
-    return salsa208poly1305_decrypt(m, c + CSSNB, clen - CSSNB, nonce,
-                                    secret_key);
+crypto_encrypt_with_new_salt(buffer_t *plaintext, cipher_ctx_t *ctx) {
+    return encrypt(plaintext, ctx, 1);
+}
+
+int
+crypto_decrypt_with_new_salt(buffer_t *ciphertext, cipher_ctx_t *ctx) {
+    return decrypt(ciphertext, ctx, 1);
 }

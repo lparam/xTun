@@ -4,9 +4,9 @@
 #include "util.h"
 
 int
-is_keepalive_packet(uint8_t *buf, ssize_t len) {
-    if ((len == sizeof(struct iphdr) + 1) && *buf == 0) { // keepalive
-        // strncmp((char *)buf, "keepalive", 9) == 0;
+is_keepalive_packet(buffer_t *buf) {
+    if ((buf->len == sizeof(struct iphdr) + 1) && *buf->data == 0) { // keepalive
+        // strncmp((char *)buf->data, "keepalive", 9) == 0;
         return 1;
     }
     return 0;

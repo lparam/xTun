@@ -187,9 +187,9 @@ dns_send_cb(uv_udp_send_t *req, int status) {
         logger_log(LOG_ERR, "DNS query failed: %s", uv_strerror(status));
     }
     uv_buf_t *buf = (uv_buf_t *)(req + 1);
-    size_t offset = sizeof(struct iphdr) - sizeof(struct udphdr)
-                    - PRIMITIVE_BYTES;
-    free(buf->base - offset);
+    size_t offset = sizeof(struct iphdr) - sizeof(struct udphdr);
+    buffer_t *buffer = container_of(buf->base - offset, buffer_t, data);
+    buffer_free(buffer);
     free(req);
 }
 
@@ -219,16 +219,15 @@ cache_log(struct iphdr *iphdr, struct udphdr *udphdr, struct sockaddr *server,
 }
 
 int
-handle_local_dns_query(int tunfd, struct sockaddr *dns_server,
-                       uint8_t *buf, int buflen)
+handle_local_dns_query(int tunfd, struct sockaddr *dns_server, buffer_t *buf)
 {
-    struct iphdr *iphdr = (struct iphdr *) buf;
-    struct udphdr *udphdr = (struct udphdr *) (buf + sizeof(struct iphdr));
+    struct iphdr *iphdr = (struct iphdr *) buf->data;
+    struct udphdr *udphdr = (struct udphdr *) (buf->data + sizeof(struct iphdr));
 
-    buf += sizeof(struct iphdr) + sizeof(struct udphdr);
-    buflen -= sizeof(struct iphdr) + sizeof(struct udphdr);
+    size_t hdrlen = sizeof(struct iphdr) + sizeof(struct udphdr);
+    size_t buflen = buf->len - hdrlen;
 
-    int domain_white = filter_query(buf, buflen);
+    int domain_white = filter_query(buf->data + hdrlen, buflen);
 
     if (!domain_white) {
         return 0;
@@ -241,10 +240,8 @@ handle_local_dns_query(int tunfd, struct sockaddr *dns_server,
         if (query) {
             cache_insert(udphdr->source, query);
         } else {
-            size_t offset = sizeof(struct iphdr) - sizeof(struct udphdr)
-                            - PRIMITIVE_BYTES;
-            free(buf - offset);
-            return 0;
+            buffer_free(buf);
+            return -1;
         }
 
     } else {
@@ -258,7 +255,7 @@ handle_local_dns_query(int tunfd, struct sockaddr *dns_server,
 
     uv_udp_send_t *write_req = malloc(sizeof(*write_req) + sizeof(uv_buf_t));
     uv_buf_t *outbuf = (uv_buf_t *)(write_req + 1);
-    outbuf->base = (char *) buf;
+    outbuf->base = (char *) buf->data + hdrlen;
     outbuf->len = buflen;
     uv_udp_send(write_req, &query->handle, outbuf, 1, dns_server, dns_send_cb);
 

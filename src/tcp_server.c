@@ -4,6 +4,7 @@
 #include "uv.h"
 
 #include "common.h"
+#include "common.h"
 #include "crypto.h"
 #include "logger.h"
 #include "packet.h"
@@ -21,6 +22,8 @@ typedef struct {
     } handle;
     struct sockaddr addr;
     buffer_t recv_buffer;
+    cipher_ctx_t *cipher_e;
+    cipher_ctx_t *cipher_d;
     peer_t *peer;
 } client_t;
 
@@ -36,16 +39,21 @@ typedef struct tcp_server {
 } tcp_server_t;
 
 static client_t *
-client_new() {
-    client_t *client = malloc(sizeof(*client));
-    memset(client, 0, sizeof(*client));
-    memset(&client->recv_buffer, 0, sizeof client->recv_buffer);
-    return client;
+client_new(size_t mtu) {
+    client_t *c = malloc(sizeof(*c));
+    memset(c, 0, sizeof(*c));
+    buffer_alloc(&c->recv_buffer, mtu + CRYPTO_MAX_OVERHEAD);
+    c->cipher_e = cipher_new();
+    c->cipher_d = cipher_new();
+    return c;
 }
 
 static void
-client_free(client_t *client) {
-    free(client);
+client_free(client_t *c) {
+    cipher_free(c->cipher_e);
+    cipher_free(c->cipher_d);
+    buffer_free(&c->recv_buffer);
+    free(c);
 }
 
 tcp_server_t *
@@ -90,7 +98,7 @@ static void
 alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
     client_t *client = container_of(handle, client_t, handle);
     buf->base = (char *)client->recv_buffer.data + client->recv_buffer.len;
-    buf->len = sizeof(client->recv_buffer.data) - client->recv_buffer.len;
+    buf->len = client->recv_buffer.capacity - client->recv_buffer.len;
 }
 
 static void
@@ -104,26 +112,17 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     if (nread > 0) {
         client->recv_buffer.len += nread;
         for (;;) {
-            packet_t packet;
-            int rc = packet_parse(&client->recv_buffer, &packet);
+            packet_t packet = {
+                .size = 0,
+            };
+            int rc = packet_parse(&client->recv_buffer, &packet, client->cipher_d);
             if (rc == PACKET_UNCOMPLETE) {
                 return;
             } else if (rc == PACKET_INVALID) {
                 goto error;
             }
 
-            int clen = packet.size;
-            int mlen = packet.size - PRIMITIVE_BYTES;
-            uint8_t *c = packet.buf, *m = packet.buf;
-
-            assert(mlen > 0 && mlen <= ctx->tun->mtu);
-
-            int err = crypto_decrypt(m, c, clen);
-            if (err) {
-                goto error;
-            }
-
-            struct iphdr *iphdr = (struct iphdr *) m;
+            struct iphdr *iphdr = (struct iphdr *) packet.buf;
 
             in_addr_t client_network = iphdr->saddr & htonl(ctx->tun->netmask);
             if (client_network != ctx->tun->network) {
@@ -159,8 +158,11 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
                 client->peer = peer;
             }
 
-            if (is_keepalive_packet(m, mlen) != 1) { // keepalive
-                tun_write(ctx->tunfd, m, mlen);
+            buffer_t tmp;
+            tmp.data = packet.buf;
+            tmp.len = packet.size;
+            if (is_keepalive_packet(&tmp) != 1) { // keepalive
+                tun_write(ctx->tunfd, packet.buf, packet.size);
             }
 
             int remain = client->recv_buffer.len - client->recv_buffer.off;
@@ -185,7 +187,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 
 error:
     if (verbose) {
-        dump_hex(buf->base, nread, "Invalid tcp Packet");
+        dump_hex(client->recv_buffer.data, client->recv_buffer.len, "Invalid tcp Packet");
     }
     handle_invalid_packet(client);
 }
@@ -193,7 +195,7 @@ error:
 static void
 accept_cb(uv_stream_t *stream, int status) {
     struct tundev_context *ctx = stream->data;
-    client_t *client = client_new();
+    client_t *client = client_new(ctx->tun->mtu);
 
     // TODO: Store client
     uv_tcp_init(stream->loop, &client->handle.tcp);
@@ -253,11 +255,11 @@ tcp_server_stop(tcp_server_t *s) {
 }
 
 void
-tcp_server_send(peer_t *peer, uint8_t *buf, int len) {
+tcp_server_send(peer_t *peer, buffer_t *buf) {
     client_t *client = peer->data;
     if (client) {
-        tcp_send(&client->handle.stream, buf, len);
+        tcp_send(&client->handle.stream, buf, client->cipher_e);
     } else {
-        free(buf);
+        buffer_free(buf);
     }
 }

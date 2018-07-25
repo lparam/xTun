@@ -38,3 +38,9 @@ buffer_free(buffer_t *buf) {
         free(buf->data);
     }
 }
+
+void
+buffer_reset(buffer_t *buf) {
+    buf->off = 0;
+    buf->len = 0;
+}

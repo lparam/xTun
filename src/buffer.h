@@ -14,5 +14,6 @@ typedef struct buffer {
 int buffer_alloc(buffer_t *ptr, size_t capacity);
 int buffer_realloc(buffer_t *buf, size_t len, size_t capacity);
 void buffer_free(buffer_t *buf);
+void buffer_reset(buffer_t *buf);
 
 #endif // for #ifndef _BUFFER_H

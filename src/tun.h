@@ -33,7 +33,6 @@ typedef struct tundev_context {
     udp_t           *udp;
     tcp_server_t    *tcp_server;
     tcp_client_t    *tcp_client;
-
     // TODO: Add buffer
     // buffer_t buffer;
     // int ready;

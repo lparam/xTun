@@ -188,7 +188,8 @@ dns_send_cb(uv_udp_send_t *req, int status) {
     }
     uv_buf_t *buf = (uv_buf_t *)(req + 1);
     size_t offset = sizeof(struct iphdr) - sizeof(struct udphdr);
-    buffer_t *buffer = container_of(buf->base - offset, buffer_t, data);
+    char *data = buf->base - offset;
+    buffer_t *buffer = container_of(&data, buffer_t, data);
     buffer_free(buffer);
     free(req);
 }

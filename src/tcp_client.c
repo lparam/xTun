@@ -117,6 +117,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
             int remain = client->recv_buffer.len - client->recv_buffer.off;
             assert(remain >= 0);
             if (remain > 0) {
+                logger_log(LOG_NOTICE, "remain: %d", remain);
                 memmove(client->recv_buffer.data,
                         client->recv_buffer.data + client->recv_buffer.off,
                         remain);
@@ -138,7 +139,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 error:
     logger_log(LOG_ERR, "Invalid tcp packet");
     if (verbose) {
-        dump_hex(buf->base, nread, "Invalid tcp Packet");
+        dump_hex(client->recv_buffer.data, client->recv_buffer.len, "Invalid tcp Packet");
     }
     tcp_client_disconnect(client);
 }
@@ -174,8 +175,7 @@ connect_cb(uv_connect_t *req, int status) {
         uv_timer_stop(&c->timer_reconnect);
         cipher_reset(c->cipher_e);
         cipher_reset(c->cipher_d);
-        c->recv_buffer.off = 0;
-        c->recv_buffer.len = 0;
+        buffer_reset(&c->recv_buffer);
         tcp_client_recv(c);
     } else {
         if (status != UV_ECANCELED) {

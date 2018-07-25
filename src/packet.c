@@ -23,7 +23,7 @@ packet_parse(buffer_t *buf, struct packet *packet, cipher_ctx_t *ctx) {
             }
 
             packet->size = read_size(buf->data);
-            if (packet->size > 10000 || packet->size == 0) {
+            if (packet->size > 10000 || packet->size <= CRYPTO_MIN_OVERHEAD) {
                 printf("%s - 2\n", __func__);
                 return PACKET_INVALID;
             }

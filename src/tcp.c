@@ -1,5 +1,6 @@
 #include "stdlib.h"
 #include "string.h"
+#include "assert.h"
 
 #include "uv.h"
 
@@ -12,8 +13,10 @@ static void
 send_cb(uv_write_t *req, int status) {
     uv_buf_t *buf1 = (uv_buf_t *) (req + 1);
     uv_buf_t *buf2 = buf1 + 1;
-    free(buf1->base);
-    free(buf2->base);
+    buffer_t *buffer1 = container_of(&buf1->base, buffer_t, data);
+    buffer_t *buffer2 = container_of(&buf2->base, buffer_t, data);
+    buffer_free(buffer1);
+    buffer_free(buffer2);
     free(req);
 }
 
@@ -24,8 +27,10 @@ tcp_send(uv_stream_t *stream, buffer_t *buf, cipher_ctx_t *ctx) {
     write_size(hdr.data, buf->len + CRYPTO_MIN_OVERHEAD);
     hdr.len = HEADER_BYTES;
 
-    crypto_encrypt(&hdr, ctx);
-    crypto_encrypt(buf, ctx);
+    int rc = crypto_encrypt(&hdr, ctx);
+    assert(rc == 0);
+    rc = crypto_encrypt(buf, ctx);
+    assert(rc == 0);
 
     uv_write_t *req = malloc(sizeof(*req) + sizeof(uv_buf_t) * 2);
 
@@ -42,7 +47,7 @@ tcp_send(uv_stream_t *stream, buffer_t *buf, cipher_ctx_t *ctx) {
         *outbuf2,
     };
 
-    int rc = uv_write(req, stream, bufs, 2, send_cb);
+    rc = uv_write(req, stream, bufs, 2, send_cb);
     if (rc) {
         logger_log(LOG_ERR, "TCP Write error (%s)", uv_strerror(rc));
         buffer_free(&hdr);

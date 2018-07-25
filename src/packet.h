@@ -4,21 +4,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "uv.h"
-
-#include "buffer.h"
 #include "crypto.h"
-
-
-#define HEADER_BYTES    2
-// #define PRIMITIVE_BYTES 24
-// #define OVERHEAD_BYTES  26
 
 #define PACKET_UNCOMPLETE 0
 #define PACKET_INVALID    1
 #define PACKET_COMPLETED  2
 
-#define PACKET_BUFFER_SIZE (64 * 1024)
+#define PACKET_HEADER_BYTES    2
+#define PACKET_BUFFER_SIZE     2048
 
 typedef struct packet {
     uint16_t size;

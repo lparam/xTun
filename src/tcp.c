@@ -13,19 +13,19 @@ static void
 send_cb(uv_write_t *req, int status) {
     uv_buf_t *buf1 = (uv_buf_t *) (req + 1);
     uv_buf_t *buf2 = buf1 + 1;
-    buffer_t *buffer1 = container_of(&buf1->base, buffer_t, data);
-    buffer_t *buffer2 = container_of(&buf2->base, buffer_t, data);
-    buffer_free(buffer1);
-    buffer_free(buffer2);
+    buffer_t *buf_hdr = container_of(&buf1->base, buffer_t, data);
+    buffer_t *buf_data = container_of(&buf2->base, buffer_t, data);
+    buffer_free(buf_hdr);
+    buffer_free(buf_data);
     free(req);
 }
 
 void
 tcp_send(uv_stream_t *stream, buffer_t *buf, cipher_ctx_t *ctx) {
     buffer_t hdr;
-    buffer_alloc(&hdr, HEADER_BYTES);
+    buffer_alloc(&hdr, PACKET_HEADER_BYTES);
     write_size(hdr.data, buf->len + CRYPTO_MIN_OVERHEAD);
-    hdr.len = HEADER_BYTES;
+    hdr.len = PACKET_HEADER_BYTES;
 
     int rc = crypto_encrypt(&hdr, ctx);
     assert(rc == 0);
@@ -34,17 +34,14 @@ tcp_send(uv_stream_t *stream, buffer_t *buf, cipher_ctx_t *ctx) {
 
     uv_write_t *req = malloc(sizeof(*req) + sizeof(uv_buf_t) * 2);
 
-    uv_buf_t *outbuf1 = (uv_buf_t *) (req + 1);
-    uv_buf_t *outbuf2 = outbuf1 + 1;
-    *outbuf1 = uv_buf_init((char *) hdr.data, hdr.len);
-    *outbuf2 = uv_buf_init((char *) buf->data, buf->len);
-
-    // dump_hex(hdr.data, hdr.len, "hdr");
-    // dump_hex(buf->data, buf->len, "data");
+    uv_buf_t *buf_hdr = (uv_buf_t *) (req + 1);
+    uv_buf_t *buf_data = buf_hdr + 1;
+    *buf_hdr = uv_buf_init((char *) hdr.data, hdr.len);
+    *buf_data = uv_buf_init((char *) buf->data, buf->len);
 
     uv_buf_t bufs[2] = {
-        *outbuf1,
-        *outbuf2,
+        *buf_hdr,
+        *buf_data,
     };
 
     rc = uv_write(req, stream, bufs, 2, send_cb);

@@ -61,7 +61,7 @@ cipher_reset(cipher_ctx_t *ctx) {
     sodium_memzero(ctx, sizeof(*ctx));
 }
 
-size_t
+inline size_t
 cipher_overhead(cipher_ctx_t *ctx) {
     if (ctx->init) {
         return crypto_aead_chacha20poly1305_ietf_ABYTES;
@@ -121,7 +121,6 @@ decrypt(buffer_t *ciphertext, cipher_ctx_t *ctx, int reset) {
     size_t salt_off = 0;
 
     if (!ctx->init || reset) {
-        // TODO: Add the salt to bloom filter
         memcpy(ctx->salt, ciphertext->data, SALT_LENGTH);
         memset(ctx->nonce, 0, sizeof ctx->nonce);
         cipher_ctx_derive_key(ctx);

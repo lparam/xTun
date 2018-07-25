@@ -41,7 +41,7 @@ udp_new(tundev_context_t *ctx, struct sockaddr *addr) {
     udp_t *udp = malloc(sizeof *udp);
     memset(udp, 0, sizeof *udp);
     udp->cipher = cipher_new();
-    buffer_alloc(&udp->recv_buffer, PACKET_BUFFER_SIZE);
+    buffer_alloc(&udp->recv_buffer, ctx->tun->mtu + CRYPTO_MAX_OVERHEAD);
     udp->addr = addr;
     udp->tun_ctx = ctx;
     udp->keepalive_interval = ctx->tun->keepalive_interval;
@@ -88,14 +88,14 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
 
         // TODO: Compare source address
         uv_rwlock_rdlock(&rwlock);
-        peer_t *peer = lookup_peer(iphdr->saddr, peers);
+        peer_t *peer = peer_lookup(iphdr->saddr, peers);
         uv_rwlock_rdunlock(&rwlock);
         if (peer == NULL) {
             char saddr[24] = {0}, daddr[24] = {0};
             parse_addr(iphdr, saddr, daddr);
             logger_log(LOG_NOTICE, "[UDP] Cache miss: %s -> %s", saddr, daddr);
             uv_rwlock_wrlock(&rwlock);
-            peer = save_peer(iphdr->saddr, (struct sockaddr *) addr, peers);
+            peer = peer_add(iphdr->saddr, (struct sockaddr *) addr, peers);
             uv_rwlock_wrunlock(&rwlock);
 
         } else {
@@ -130,24 +130,18 @@ inet_send_cb(uv_udp_send_t *req, int status) {
                    status, uv_strerror(status));
     }
     uv_buf_t *buf = (uv_buf_t *) (req + 1);
-    // printf("%s - buf: %p - %p\n", __func__, buf, buf->base);
     buffer_t *buffer = container_of(&buf->base, buffer_t, data);
-    // printf("%s - buffer: %p - %p\n", __func__, buffer, buffer->data);
     buffer_free(buffer);
     free(req);
 }
 
 void
 udp_send(udp_t *udp, buffer_t *buf, struct sockaddr *addr) {
-    // dump_hex(buf->data, buf->len, "udp 0");
     crypto_encrypt_with_new_salt(buf, udp->cipher);
-    // dump_hex(buf->data, buf->len, "udp 1");
     uv_udp_send_t *write_req = malloc(sizeof(*write_req) + sizeof(uv_buf_t));
     uv_buf_t *outbuf = (uv_buf_t *) (write_req + 1);
     outbuf->base = (char *) buf->data;
     outbuf->len = buf->len;
-    // printf("%s - buf: %p - %p\n", __func__, outbuf, outbuf->base);
-    // printf("%s - buffer: %p - %p\n", __func__, buf, buf->data);
     int rc = uv_udp_send(write_req, &udp->inet_udp, outbuf, 1,
                          mode == xTUN_SERVER ? addr : udp->addr, inet_send_cb);
     if (rc) {

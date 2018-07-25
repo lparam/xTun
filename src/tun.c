@@ -32,6 +32,7 @@ static void loop_close(uv_loop_t *loop);
 static void signal_cb(uv_signal_t *handle, int signum);
 static void signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data);
 
+
 int
 tun_write(int tunfd, uint8_t *buf, ssize_t len) {
     uint8_t *pos = buf;
@@ -77,42 +78,25 @@ close_network(struct tundev_context *ctx) {
     }
 }
 
-static void
-poll_cb(uv_poll_t *watcher, int status, int events) {
-    struct tundev *tun;
-    struct tundev_context *ctx;
-    buffer_t tunbuf;
-
-    ctx = container_of(watcher, struct tundev_context, watcher);
-    tun = ctx->tun;
-
-    // TODO: Use output buffer
-    buffer_alloc(&tunbuf, tun->mtu);
-    // printf("%s - buffer: %p - %p\n", __func__, &tunbuf, tunbuf.data);
-
-    int n = read(ctx->tunfd, tunbuf.data, tunbuf.capacity);
-    if (n <= 0) {
-        logger_log(LOG_ERR, "tun read error");
-        return buffer_free(&tunbuf);
-    }
-    tunbuf.len = n;
-
-    struct iphdr *iphdr = (struct iphdr *) tunbuf.data;
+static int
+route(buffer_t *tunbuf, struct tundev_context *ctx) {
+    struct iphdr *iphdr = (struct iphdr *) tunbuf->data;
     if (iphdr->version != 4) {
         logger_log(LOG_WARNING, "Discard non-IPv4 packet");
-        return buffer_free(&tunbuf);
+        return 1;
     }
 
     if (mode == xTUN_SERVER) {
         uv_rwlock_rdlock(&rwlock);
-        peer_t *peer = lookup_peer(iphdr->daddr, peers);
+        peer_t *peer = peer_lookup(iphdr->daddr, peers);
         uv_rwlock_rdunlock(&rwlock);
         if (peer) {
+            // TODO: use peerops_t
             assert(peer->protocol == xTUN_TCP || peer->protocol == xTUN_UDP);
             if (peer->protocol == xTUN_TCP) {
-                tcp_server_send(peer, &tunbuf);
+                tcp_server_send(peer, tunbuf);
             } else {
-                udp_send(ctx->udp, &tunbuf, &peer->remote_addr);
+                udp_send(ctx->udp, tunbuf, &peer->remote_addr);
             }
 
         } else {
@@ -125,7 +109,7 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
                 logger_log(LOG_WARNING, "Client is not connected: %s -> %s",
                            saddr, daddr);
             }
-            return buffer_free(&tunbuf);
+            return 1;
         }
 
     } else {
@@ -133,21 +117,21 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
         if (network != ctx->tun->network) {
             char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
             logger_log(LOG_ERR, "Invalid client: %s", a);
-            return buffer_free(&tunbuf);
+            return 1;
         }
 
 #ifdef ANDROID
         // TODO: Check full DNS packet
-        if (!tun->global) {
+        if (!ctx->tun->global) {
             uint16_t frag = iphdr->frag_off & htons(0x1fff);
             if ((iphdr->protocol == IPPROTO_UDP) && (frag == 0)) {
                 struct udphdr *udph = (struct udphdr *)
-                                      (tunbuf.data + sizeof(struct iphdr));
+                                      (tunbuf->data + sizeof(struct iphdr));
                 if (ntohs(udph->dest) == DNS_PORT) {
                     int rc = handle_local_dns_query(ctx->tunfd,
-                                                    &tun->dns_server, &tunbuf);
+                                                    &ctx->tun->dns_server, tunbuf);
                     if (rc) {
-                        return;
+                        return 0;
                     }
                 }
             }
@@ -155,18 +139,42 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
 #endif
         if (protocol == xTUN_TCP) {
             if (tcp_client_connected(ctx->tcp_client)) {
-                tcp_client_send(ctx->tcp_client, &tunbuf);
+                tcp_client_send(ctx->tcp_client, tunbuf);
 
             } else {
                 if (tcp_client_disconnected(ctx->tcp_client)) {
                     tcp_client_connect(ctx->tcp_client);
                 }
-                return buffer_free(&tunbuf);
+                return 1;
             }
 
         } else {
-            udp_send(ctx->udp, &tunbuf, NULL);
+            udp_send(ctx->udp, tunbuf, NULL);
         }
+    }
+
+    return 0;
+}
+
+static void
+poll_cb(uv_poll_t *watcher, int status, int events) {
+    struct tundev_context *ctx;
+    buffer_t tunbuf;
+
+    ctx = container_of(watcher, struct tundev_context, watcher);
+
+    buffer_alloc(&tunbuf, ctx->tun->mtu);
+
+    int n = read(ctx->tunfd, tunbuf.data, tunbuf.capacity);
+    if (n <= 0) {
+        logger_log(LOG_ERR, "tun read error - (%d: %s)", errno, strerror(errno));
+        return buffer_free(&tunbuf);
+    }
+    tunbuf.len = n;
+
+    int rc = route(&tunbuf, ctx);
+    if (rc) {
+        buffer_free(&tunbuf);
     }
 }
 
@@ -502,7 +510,7 @@ tun_run(struct tundev *tun, const char *server, int port) {
 
     if (mode == xTUN_SERVER) {
         uv_rwlock_init(&rwlock);
-        init_peers(peers);
+        peer_init(peers);
     }
 
     if (mode == xTUN_SERVER && tun->queues > 1) {
@@ -558,7 +566,7 @@ tun_run(struct tundev *tun, const char *server, int port) {
 
     if (mode == xTUN_SERVER) {
         uv_rwlock_destroy(&rwlock);
-        destroy_peers(peers);
+        peer_destroy(peers);
     }
 
     return 0;

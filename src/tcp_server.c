@@ -99,6 +99,7 @@ alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
     client_t *client = container_of(handle, client_t, handle);
     buf->base = (char *)client->recv_buffer.data + client->recv_buffer.len;
     buf->len = client->recv_buffer.capacity - client->recv_buffer.len;
+    assert(buf->len > 0);
 }
 
 static void
@@ -134,7 +135,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 
             if (client->peer == NULL) {
                 uv_rwlock_rdlock(&rwlock);
-                peer_t *peer = lookup_peer(iphdr->saddr, peers);
+                peer_t *peer = peer_lookup(iphdr->saddr, peers);
                 uv_rwlock_rdunlock(&rwlock);
                 if (peer == NULL) {
                     char saddr[24] = {0}, daddr[24] = {0};
@@ -143,7 +144,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
                                saddr, daddr);
 
                     uv_rwlock_wrlock(&rwlock);
-                    peer = save_peer(iphdr->saddr, &client->addr, peers);
+                    peer = peer_add(iphdr->saddr, &client->addr, peers);
                     uv_rwlock_wrunlock(&rwlock);
 
                 } else {

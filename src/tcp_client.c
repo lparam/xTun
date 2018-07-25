@@ -115,9 +115,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
             tun_write(client->tun_ctx->tunfd, packet.buf, packet.size);
 
             int remain = client->recv_buffer.len - client->recv_buffer.off;
-            assert(remain >= 0);
             if (remain > 0) {
-                logger_log(LOG_NOTICE, "remain: %d", remain);
                 memmove(client->recv_buffer.data,
                         client->recv_buffer.data + client->recv_buffer.off,
                         remain);

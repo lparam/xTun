@@ -13,8 +13,8 @@
 /* #define MTU 1440 */
 
 /* MTU of VPN tunnel device. Use the following formula to calculate:
-   1492 (Ethernet) - 20 (IPv4, or 40 for IPv6) - 20 (TCP) - 26 (xTun) */
-#define MTU 1426
+   1492 (Ethernet) - 20 (IPv4, or 40 for IPv6) - 20 (TCP) - 42 (xTun) */
+#define MTU 1410
 
 #define XTUN_MAX_MTU    10000
 

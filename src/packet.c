@@ -10,7 +10,7 @@ packet_parse(buffer_t *buf, struct packet *packet, cipher_ctx_t *ctx) {
     int off = 0;
     buffer_t tmp;
     for (;;) {
-        if (packet->size == 0) {
+        if (buf->off == 0) {
 
         }
 
@@ -19,10 +19,14 @@ packet_parse(buffer_t *buf, struct packet *packet, cipher_ctx_t *ctx) {
             return PACKET_UNCOMPLETE;
         }
 
-        tmp.data = buf->data;
+        uint8_t hdrbuf[hdrsz];
+        memcpy(hdrbuf, buf->data, hdrsz);
+        tmp.data = hdrbuf;
         tmp.len = hdrsz;
+
         if (crypto_decrypt(&tmp, ctx)) {
             printf("%s - 1 len: %ld\n", __func__, hdrsz);
+            dump_hex(buf->data, hdrsz, "hdr");
             return PACKET_INVALID;
         }
         assert(tmp.len == PACKET_HEADER_BYTES);
@@ -53,4 +57,10 @@ packet_parse(buffer_t *buf, struct packet *packet, cipher_ctx_t *ctx) {
 
         return PACKET_COMPLETED;
     }
+}
+
+void
+packet_reset(packet_t *packet) {
+    packet->buf = NULL;
+    packet->size = 0;
 }

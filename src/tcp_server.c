@@ -168,6 +168,8 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 
             int remain = client->recv_buffer.len - client->recv_buffer.off;
             assert(remain >= 0);
+            printf("nread: %ld len: %ld off: %d remain: %d\n",
+                    nread, client->recv_buffer.len, client->recv_buffer.off, remain);
             if (remain > 0) {
                 memmove(client->recv_buffer.data,
                         client->recv_buffer.data + client->recv_buffer.off, remain);

@@ -8,6 +8,7 @@
 #include "crypto.h"
 #include "packet.h"
 #include "util.h"
+#include "tun.h"
 
 static void
 send_cb(uv_write_t *req, int status) {
@@ -38,6 +39,11 @@ tcp_send(uv_stream_t *stream, buffer_t *buf, cipher_ctx_t *ctx) {
     uv_buf_t *buf_data = buf_hdr + 1;
     *buf_hdr = uv_buf_init((char *) hdr.data, hdr.len);
     *buf_data = uv_buf_init((char *) buf->data, buf->len);
+
+    // if (mode == xTUN_CLIENT) {
+    //     dump_hex(hdr.data, hdr.len, "hdr");
+    //     dump_hex(buf->data, buf->len, "data");
+    // }
 
     uv_buf_t bufs[2] = {
         *buf_hdr,

@@ -36,6 +36,7 @@ typedef struct tcp_client {
     uv_timer_t timer_keepalive;
     uv_timer_t timer_reconnect;
     buffer_t recv_buffer;
+    packet_t packet;
     cipher_ctx_t *cipher_e;
     cipher_ctx_t *cipher_d;
     tundev_context_t *tun_ctx;
@@ -116,6 +117,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 
             int remain = client->recv_buffer.len - client->recv_buffer.off;
             if (remain > 0) {
+                printf("remain: %d\n", remain);
                 memmove(client->recv_buffer.data,
                         client->recv_buffer.data + client->recv_buffer.off,
                         remain);

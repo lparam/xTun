@@ -20,7 +20,7 @@ typedef struct packet {
 
 typedef struct tundev tundev_t;
 
-int packet_parse(struct packet *packet, buffer_t *buf, cipher_ctx_t *ctx);
+int packet_parse(packet_t *packet, buffer_t *buf, cipher_ctx_t *ctx);
 void packet_reset(packet_t *packet);
 int packet_is_keepalive(buffer_t *buf);
 void packet_construct_keepalive(buffer_t *buf, tundev_t *tun);

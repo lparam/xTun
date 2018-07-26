@@ -6,7 +6,7 @@
 #include "tun.h"
 
 int
-packet_parse(struct packet *packet, buffer_t *buf, cipher_ctx_t *ctx) {
+packet_parse(packet_t *packet, buffer_t *buf, cipher_ctx_t *ctx) {
     buffer_t tmp;
 
     if (packet->size == 0) {

@@ -135,6 +135,8 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         if (nread != UV_EOF) {
             logger_log(LOG_ERR, "Receive from server failed (%d: %s)",
                        nread, uv_strerror(nread));
+        } else {
+            logger_log(LOG_INFO, "Server close");
         }
         tcp_client_disconnect(client);
     }

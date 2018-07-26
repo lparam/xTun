@@ -54,6 +54,7 @@ typedef struct tundev {
     struct tundev_ctx      contexts[0];
 } tundev_t;
 
+uv_rwlock_t clients_rwlock;
 uv_rwlock_t rwlock;
 peer_t *peers[HASHSIZE];
 

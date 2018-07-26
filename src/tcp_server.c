@@ -1,7 +1,9 @@
 #include <string.h>
 #include <assert.h>
+#include <inttypes.h>
 
 #include "uv.h"
+#include "uv/tree.h"
 
 #include "crypto.h"
 #include "logger.h"
@@ -12,7 +14,8 @@
 #include "tcp.h"
 
 
-typedef struct {
+typedef struct client {
+    uint64_t cid;
     union {
         uv_tcp_t tcp;
         uv_handle_t handle;
@@ -24,6 +27,7 @@ typedef struct {
     cipher_ctx_t *cipher_e;
     cipher_ctx_t *cipher_d;
     peer_t *peer;
+    RB_ENTRY(client) entry;
 } client_t;
 
 typedef struct tcp_server {
@@ -37,10 +41,25 @@ typedef struct tcp_server {
     tundev_ctx_t *tun_ctx;
 } tcp_server_t;
 
+RB_HEAD(client_tree, client);
+
+static struct client_tree clients = RB_INITIALIZER(clients);
+static uint64_t gcid;
+
+static int
+client_compare(const struct client *a, const struct client *b) {
+    if (a->cid < b->cid) return -1;
+    if (a->cid > b->cid) return 1;
+    return 0;
+}
+
+RB_GENERATE_STATIC(client_tree, client, entry, client_compare)
+
 static client_t *
 client_new(size_t mtu) {
     client_t *c = malloc(sizeof(*c));
     memset(c, 0, sizeof(*c));
+    c->cid = ATOMIC_INC(&gcid);
     buffer_alloc(&c->recv_buffer, mtu + CRYPTO_MAX_OVERHEAD);
     packet_reset(&c->packet);
     c->cipher_e = cipher_new();
@@ -69,6 +88,7 @@ client_close(client_t *c) {
         c->peer = NULL;
     }
     uv_close(&c->handle.handle, client_close_cb);
+    RB_REMOVE(client_tree, &clients, c);
 }
 
 tcp_server_t *
@@ -197,15 +217,17 @@ client_info(client_t *client) {
     int port = 0;
     char remote[INET_ADDRSTRLEN + 1];
     port = ip_name(&client->addr, remote, sizeof(remote));
-    logger_log(LOG_INFO, "%s:%d incoming", remote, port);
+    logger_log(LOG_INFO, "cid:%"PRIu64" - %s:%d incoming", client->cid, remote, port);
 }
 
 static void
 accept_cb(uv_stream_t *stream, int status) {
     tundev_ctx_t *ctx = stream->data;
     client_t *client = client_new(ctx->tun->mtu);
+    uv_rwlock_wrlock(&clients_rwlock);
+    RB_INSERT(client_tree, &clients, client);
+    uv_rwlock_wrunlock(&clients_rwlock);
 
-    // TODO: Store client
     uv_tcp_init(stream->loop, &client->handle.tcp);
     int rc = uv_accept(stream, &client->handle.stream);
     if (rc == 0) {
@@ -216,7 +238,6 @@ accept_cb(uv_stream_t *stream, int status) {
         uv_tcp_nodelay(&client->handle.tcp, 1);
         uv_tcp_keepalive(&client->handle.tcp, 1, 60);
         uv_read_start(&client->handle.stream, alloc_cb, recv_cb);
-        // TODO: register client handler
 
     } else {
         logger_log(LOG_ERR, "accept error: %s", uv_strerror(rc));
@@ -260,7 +281,10 @@ tcp_server_stop(tcp_server_t *s) {
     if (uv_is_active(&s->inet_tcp.handle)) {
         uv_close(&s->inet_tcp.handle, NULL);
     }
-    // TODO: Close all client
+    client_t *c;
+    RB_FOREACH(c, client_tree, &clients) {
+        client_close(c);
+    }
 }
 
 void

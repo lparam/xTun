@@ -500,6 +500,7 @@ tun_run(tundev_t *tun, const char *server, int port) {
 
     if (mode == xTUN_SERVER) {
         uv_rwlock_init(&rwlock);
+        uv_rwlock_init(&clients_rwlock);
         peer_init(peers);
     }
 
@@ -556,6 +557,7 @@ tun_run(tundev_t *tun, const char *server, int port) {
 
     if (mode == xTUN_SERVER) {
         uv_rwlock_destroy(&rwlock);
+        uv_rwlock_destroy(&clients_rwlock);
         peer_destroy(peers);
     }
 

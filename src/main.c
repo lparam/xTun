@@ -228,7 +228,7 @@ main(int argc, char *argv[]) {
         return 1;
     }
 
-	struct tundev *tun = tun_alloc(iface, parallel);
+	tundev_t *tun = tun_alloc(iface, parallel);
     if (!tun) {
         return 1;
     }

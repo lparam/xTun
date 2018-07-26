@@ -12,19 +12,23 @@
 
 static void
 send_cb(uv_write_t *req, int status) {
-    uv_buf_t *buf1 = (uv_buf_t *) (req + 1);
-    uv_buf_t *buf2 = buf1 + 1;
-    buffer_t *buf_hdr = container_of(&buf1->base, buffer_t, data);
-    buffer_t *buf_data = container_of(&buf2->base, buffer_t, data);
-    buffer_free(buf_hdr);
-    buffer_free(buf_data);
+    if (status) {
+        logger_log(LOG_ERR, "TCP send failed (%d: %s)",
+                   status, uv_strerror(status));
+    }
+    uv_buf_t *buf_hdr = (uv_buf_t *) (req + 1);
+    uv_buf_t *buf_data = buf_hdr + 1;
+    buffer_t *hdr = container_of(&buf_hdr->base, buffer_t, data);
+    buffer_t *data = container_of(&buf_data->base, buffer_t, data);
+    buffer_free(hdr);
+    buffer_free(data);
     free(req);
 }
 
 void
 tcp_send(uv_stream_t *stream, buffer_t *buf, cipher_ctx_t *ctx) {
     buffer_t hdr;
-    buffer_alloc(&hdr, PACKET_HEADER_BYTES);
+    buffer_alloc(&hdr, CRYPTO_MAX_OVERHEAD);
     write_size(hdr.data, buf->len + CRYPTO_MIN_OVERHEAD);
     hdr.len = PACKET_HEADER_BYTES;
 
@@ -40,7 +44,7 @@ tcp_send(uv_stream_t *stream, buffer_t *buf, cipher_ctx_t *ctx) {
     *buf_hdr = uv_buf_init((char *) hdr.data, hdr.len);
     *buf_data = uv_buf_init((char *) buf->data, buf->len);
 
-    uv_buf_t bufs[2] = {
+    uv_buf_t bufs[] = {
         *buf_hdr,
         *buf_data,
     };

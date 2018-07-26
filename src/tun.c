@@ -41,8 +41,7 @@ tun_write(int tunfd, uint8_t *buf, ssize_t len) {
         ssize_t sz = write(tunfd, pos, remaining);
         if(sz == -1) {
             if(errno != EAGAIN && errno != EWOULDBLOCK) {
-                logger_stderr("Write tun error (%d: %s)",
-                               errno, strerror(errno));
+                logger_stderr("tun write error (%d: %s)", errno, strerror(errno));
                 return -1;
             } else {
                 continue;
@@ -54,35 +53,11 @@ tun_write(int tunfd, uint8_t *buf, ssize_t len) {
     return 0;
 }
 
-static void
-close_tunfd(int fd) {
-    /* valgrind may generate a false alarm here */
-    if(ioctl(fd, TUNSETPERSIST, 0) < 0) {
-        logger_stderr("ioctl(TUNSETPERSIST): %s", strerror(errno));
-    }
-    close(fd);
-}
-
-static void
-close_network(struct tundev_context *ctx) {
-    if (mode == xTUN_SERVER) {
-        tcp_server_stop(ctx->tcp_server);
-        udp_stop(ctx->udp);
-
-    } else {
-        if (protocol == xTUN_TCP) {
-            tcp_client_stop(ctx->tcp_client);
-        } else {
-            udp_stop(ctx->udp);
-        }
-    }
-}
-
 static int
-route(buffer_t *tunbuf, struct tundev_context *ctx) {
+route(buffer_t *tunbuf, tundev_ctx_t *ctx) {
     struct iphdr *iphdr = (struct iphdr *) tunbuf->data;
     if (iphdr->version != 4) {
-        logger_log(LOG_WARNING, "Discard non-IPv4 packet");
+        logger_log(LOG_NOTICE, "Discard non-IPv4 packet");
         return 1;
     }
 
@@ -108,36 +83,20 @@ route(buffer_t *tunbuf, struct tundev_context *ctx) {
             }
 
         } else {
-            char saddr[24] = {0}, daddr[24] = {0};
-            parse_addr(iphdr, saddr, daddr);
-            in_addr_t network = iphdr->daddr & htonl(ctx->tun->netmask);
-            if (network != ctx->tun->network) {
-                logger_log(LOG_NOTICE, "Discard %s -> %s", saddr, daddr);
-            } else {
-                logger_log(LOG_WARNING, "Client is not connected: %s -> %s",
-                           saddr, daddr);
-            }
+            logger_log(LOG_WARNING, "Peer is not connected: %s -> %s", saddr, daddr);
             return 1;
         }
 
     } else {
-        in_addr_t network = iphdr->saddr & htonl(ctx->tun->netmask);
-        if (network != ctx->tun->network) {
-            char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
-            logger_log(LOG_ERR, "Invalid client: %s", a);
-            return 1;
-        }
-
 #ifdef ANDROID
         // TODO: Check full DNS packet
-        if (!ctx->tun->global) {
+        if (!dns_global) {
             uint16_t frag = iphdr->frag_off & htons(0x1fff);
             if ((iphdr->protocol == IPPROTO_UDP) && (frag == 0)) {
                 struct udphdr *udph = (struct udphdr *)
                                       (tunbuf->data + sizeof(struct iphdr));
                 if (ntohs(udph->dest) == DNS_PORT) {
-                    int rc = handle_local_dns_query(ctx->tunfd,
-                                                    &ctx->tun->dns_server, tunbuf);
+                    int rc = handle_local_dns_query(ctx->tunfd, &dns_server, tunbuf);
                     if (rc) {
                         return 0;
                     }
@@ -166,16 +125,14 @@ route(buffer_t *tunbuf, struct tundev_context *ctx) {
 
 static void
 poll_cb(uv_poll_t *watcher, int status, int events) {
-    struct tundev_context *ctx;
+    tundev_ctx_t *ctx = container_of(watcher, tundev_ctx_t, watcher);
+
     buffer_t tunbuf;
+    buffer_alloc(&tunbuf, ctx->tun->mtu + CRYPTO_MAX_OVERHEAD);
 
-    ctx = container_of(watcher, struct tundev_context, watcher);
-
-    buffer_alloc(&tunbuf, ctx->tun->mtu);
-
-    int n = read(ctx->tunfd, tunbuf.data, tunbuf.capacity);
+    int n = read(ctx->tunfd, tunbuf.data, ctx->tun->mtu);
     if (n <= 0) {
-        logger_log(LOG_ERR, "tun read error - (%d: %s)", errno, strerror(errno));
+        logger_log(LOG_ERR, "tun read error (%d: %s)", errno, strerror(errno));
         return buffer_free(&tunbuf);
     }
     tunbuf.len = n;
@@ -186,15 +143,41 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
     }
 }
 
+static void
+close_tunfd(int fd) {
+    /* valgrind may generate a false alarm here */
+    if(ioctl(fd, TUNSETPERSIST, 0) < 0) {
+        logger_stderr("ioctl(TUNSETPERSIST): %s", strerror(errno));
+    }
+    close(fd);
+}
+
+static void
+close_network(tundev_ctx_t *ctx) {
+    if (mode == xTUN_SERVER) {
+        if (ctx->tcp_server) {
+            tcp_server_stop(ctx->tcp_server);
+        }
+        udp_stop(ctx->udp);
+
+    } else {
+        if (protocol == xTUN_TCP) {
+            tcp_client_stop(ctx->tcp_client);
+        } else {
+            udp_stop(ctx->udp);
+        }
+    }
+}
+
 #ifndef ANDROID
-struct tundev *
+tundev_t *
 tun_alloc(char *iface, uint32_t parallel) {
     int i, err, fd, nqueues;
-    struct tundev *tun;
+    tundev_t *tun;
 
     nqueues = mode == xTUN_SERVER ? parallel : 1;
 
-    size_t ctxsz = sizeof(struct tundev_context) * nqueues;
+    size_t ctxsz = sizeof(tundev_ctx_t) * nqueues;
     tun = malloc(sizeof(*tun) + ctxsz);
     memset(tun, 0, sizeof(*tun) + ctxsz);
     tun->queues = nqueues;
@@ -216,7 +199,7 @@ tun_alloc(char *iface, uint32_t parallel) {
             close(fd);
             goto err;
         }
-        struct tundev_context *ctx = &tun->contexts[i];
+        tundev_ctx_t *ctx = &tun->contexts[i];
         ctx->tun = tun;
         ctx->tunfd = fd;
     }
@@ -224,25 +207,25 @@ tun_alloc(char *iface, uint32_t parallel) {
     return tun;
 err:
     for (--i; i >= 0; i--) {
-        struct tundev_context *ctx = &tun->contexts[i];
+        tundev_ctx_t *ctx = &tun->contexts[i];
         close(ctx->tunfd);
     }
     free(tun);
     return NULL;
 }
 #else
-struct tundev *
+tundev_t *
 tun_alloc() {
     int queues = 1;
-    size_t ctxsz = sizeof(struct tundev_context) * queues;
+    size_t ctxsz = sizeof(tundev_ctx_t) * queues;
 
-    struct tundev *tun = malloc(sizeof(*tun) + ctxsz);
+    tundev_t *tun = malloc(sizeof(*tun) + ctxsz);
     memset(tun, 0, sizeof(*tun) + ctxsz);
     tun->queues = queues;
 
     mode = xTUN_CLIENT;
 
-    struct tundev_context *ctx = tun->contexts;
+    tundev_ctx_t *ctx = tun->contexts;
     ctx->tun = tun;
 
     return tun;
@@ -250,9 +233,9 @@ tun_alloc() {
 #endif
 
 void
-tun_free(struct tundev *tun) {
+tun_free(tundev_t *tun) {
     for (int i = 0; i < tun->queues; i++) {
-        struct tundev_context *ctx = &tun->contexts[i];
+        tundev_ctx_t *ctx = &tun->contexts[i];
         if (mode == xTUN_SERVER) {
             if (ctx->tcp_server) {
                 tcp_server_free(ctx->tcp_server);
@@ -272,7 +255,7 @@ tun_free(struct tundev *tun) {
 
 #ifndef ANDROID
 void
-tun_config(struct tundev *tun, const char *ifconf, int mtu) {
+tun_config(tundev_t *tun, const char *ifconf, int mtu) {
     tun->mtu = mtu;
     strcpy(tun->ifconf, ifconf);
 
@@ -341,16 +324,16 @@ tun_config(struct tundev *tun, const char *ifconf, int mtu) {
 #else
 static void
 tun_close(uv_async_t *handle) {
-    struct tundev_context *ctx = container_of(handle, struct tundev_context,
+    tundev_ctx_t *ctx = container_of(handle, tundev_ctx_t,
                                               async_handle);
-    struct tundev *tun = ctx->tun;
+    tundev_t *tun = ctx->tun;
 
     uv_close((uv_handle_t *) &ctx->async_handle, NULL);
     close_network(ctx);
     uv_poll_stop(&ctx->watcher);
     close_tunfd(ctx->tunfd);
 
-    if (!tun->global) {
+    if (!dns_global) {
         clear_dns_query();
     }
 
@@ -358,10 +341,10 @@ tun_close(uv_async_t *handle) {
 }
 
 int
-tun_config(struct tundev *tun, const char *ifconf, int fd, int mtu, int prot,
+tun_config(tundev_t *tun, const char *ifconf, int fd, int mtu, int prot,
            int global, int v, const char *dns)
 {
-    struct tundev_context *ctx = tun->contexts;
+    tundev_ctx_t *ctx = tun->contexts;
 
 	char *cidr = strchr(ifconf, '/');
 	if(!cidr) {
@@ -381,12 +364,12 @@ tun_config(struct tundev *tun, const char *ifconf, int fd, int mtu, int prot,
     verbose = v;
     protocol = prot;
 
-    struct sockaddr_in dns_server;
-    uv_ip4_addr(dns, DNS_PORT, &dns_server);
-    tun->dns_server = *((struct sockaddr *) &dns_server);
+    struct sockaddr_in ds;
+    uv_ip4_addr(dns, DNS_PORT, &ds);
+    dns_server = *((struct sockaddr *) &ds);
 
     tun->mtu = mtu;
-    tun->global = global;
+    dns_global = global;
 
     ctx->tunfd = fd;
 
@@ -397,7 +380,7 @@ tun_config(struct tundev *tun, const char *ifconf, int fd, int mtu, int prot,
 }
 #endif
 
-int tun_keepalive(struct tundev *tun, int on, unsigned int interval) {
+int tun_keepalive(tundev_t *tun, int on, unsigned int interval) {
     if (on && interval) {
         tun->keepalive_interval = interval;
     } else {
@@ -407,30 +390,29 @@ int tun_keepalive(struct tundev *tun, int on, unsigned int interval) {
 }
 
 void
-tun_stop(struct tundev *tun) {
+tun_stop(tundev_t *tun) {
 #ifndef ANDROID
     if (mode == xTUN_SERVER && tun->queues > 1) {
         for (int i = 0; i < tun->queues; i++) {
-            struct tundev_context *ctx = &tun->contexts[i];
+            tundev_ctx_t *ctx = &tun->contexts[i];
             uv_async_send(&ctx->async_handle);
         }
 
     } else {
-        struct tundev_context *ctx = tun->contexts;
+        tundev_ctx_t *ctx = tun->contexts;
         close_network(ctx);
         uv_poll_stop(&ctx->watcher);
         close_tunfd(ctx->tunfd);
     }
 #else
-    struct tundev_context *ctx = tun->contexts;
+    tundev_ctx_t *ctx = tun->contexts;
     uv_async_send(&ctx->async_handle);
 #endif
 }
 
 static void
 queue_close(uv_async_t *handle) {
-    struct tundev_context *ctx = container_of(handle, struct tundev_context,
-                                              async_handle);
+    tundev_ctx_t *ctx = container_of(handle, tundev_ctx_t, async_handle);
     uv_close((uv_handle_t *) &ctx->async_handle, NULL);
     close_network(ctx);
     uv_poll_stop(&ctx->watcher);
@@ -439,7 +421,7 @@ queue_close(uv_async_t *handle) {
 
 static void
 queue_start(void *arg) {
-    struct tundev_context *ctx = arg;
+    tundev_ctx_t *ctx = arg;
     uv_loop_t loop;
 
     uv_loop_init(&loop);
@@ -487,7 +469,7 @@ signal_cb(uv_signal_t *handle, int signum) {
 
         signal_close();
 
-        struct tundev *tun = handle->data;
+        tundev_t *tun = handle->data;
         tun_stop(tun);
     }
 }
@@ -505,9 +487,9 @@ signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data) {
 
 int
 #ifndef ANDROID
-tun_run(struct tundev *tun, struct sockaddr addr) {
+tun_run(tundev_t *tun, struct sockaddr addr) {
 #else
-tun_run(struct tundev *tun, const char *server, int port) {
+tun_run(tundev_t *tun, const char *server, int port) {
     struct sockaddr addr;
     if (resolve_addr(server, port, &addr)) {
         logger_stderr("Invalid server address");
@@ -525,7 +507,7 @@ tun_run(struct tundev *tun, const char *server, int port) {
         int i;
         for (i = 0; i < tun->queues; i++) {
             uv_thread_t thread_id;
-            struct tundev_context *ctx = &tun->contexts[i];
+            tundev_ctx_t *ctx = &tun->contexts[i];
             ctx->udp = udp_new(ctx, &addr);
             uv_sem_init(&ctx->semaphore, 0);
             uv_thread_create(&thread_id, queue_start, ctx);
@@ -542,7 +524,7 @@ tun_run(struct tundev *tun, const char *server, int port) {
         }
 
     } else {
-        struct tundev_context *ctx = tun->contexts;
+        tundev_ctx_t *ctx = tun->contexts;
 
         if (mode == xTUN_SERVER) {
             ctx->udp = udp_new(ctx, &addr);

@@ -16,7 +16,6 @@
 
 #include "util.h"
 #include "logger.h"
-#include "common.h"
 #include "crypto.h"
 #include "peer.h"
 #include "tun.h"
@@ -33,11 +32,11 @@ typedef struct udp {
     uv_timer_t timer_keepalive;
     buffer_t recv_buffer;
     cipher_ctx_t *cipher;
-    tundev_context_t *tun_ctx;
+    tundev_ctx_t *tun_ctx;
 } udp_t;
 
 udp_t *
-udp_new(tundev_context_t *ctx, struct sockaddr *addr) {
+udp_new(tundev_ctx_t *ctx, struct sockaddr *addr) {
     udp_t *udp = malloc(sizeof *udp);
     memset(udp, 0, sizeof *udp);
     udp->cipher = cipher_new();
@@ -83,7 +82,7 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
         in_addr_t client_network = iphdr->saddr & htonl(udp->tun_ctx->tun->netmask);
         if (client_network != udp->tun_ctx->tun->network) {
             char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
-            return logger_log(LOG_ERR, "Invalid client: %s", a);
+            return logger_log(LOG_ERR, "Invalid peer: %s", a);
         }
 
         // TODO: Compare source address
@@ -105,7 +104,7 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
         }
         peer->protocol = xTUN_UDP;
 
-        if (is_keepalive_packet(&udp->recv_buffer) == 1) { // keepalive
+        if (packet_is_keepalive(&udp->recv_buffer) == 1) { // keepalive
             return;
         }
     }
@@ -130,8 +129,8 @@ inet_send_cb(uv_udp_send_t *req, int status) {
                    status, uv_strerror(status));
     }
     uv_buf_t *buf = (uv_buf_t *) (req + 1);
-    buffer_t *buffer = container_of(&buf->base, buffer_t, data);
-    buffer_free(buffer);
+    buffer_t *data = container_of(&buf->base, buffer_t, data);
+    buffer_free(data);
     free(req);
 }
 
@@ -153,11 +152,8 @@ udp_send(udp_t *udp, buffer_t *buf, struct sockaddr *addr) {
 static void
 keepalive(uv_timer_t *handle) {
     udp_t *udp = container_of(handle, udp_t, timer_keepalive);
-    size_t len = sizeof(struct iphdr) + 1;
     buffer_t buf;
-    buffer_alloc(&buf, len);
-    buf.len = len;
-    construct_keepalive_packet(udp->tun_ctx->tun, buf.data);
+    packet_construct_keepalive(&buf, udp->tun_ctx->tun);
     udp_send(udp, &buf, NULL);
 }
 
@@ -178,6 +174,7 @@ udp_start(udp_t *udp, uv_loop_t *loop) {
     }
 
 #ifdef ANDROID
+        extern int protect_socket(int fd);
         rc = protect_socket(udp->inet_udp_fd);
         logger_log(rc ? LOG_INFO : LOG_ERR, "Protect socket %s",
                    rc ? "successful" : "failed");

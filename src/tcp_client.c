@@ -3,7 +3,6 @@
 
 #include "uv.h"
 
-#include "common.h"
 #include "crypto.h"
 #include "logger.h"
 #include "packet.h"
@@ -39,11 +38,11 @@ typedef struct tcp_client {
     packet_t packet;
     cipher_ctx_t *cipher_e;
     cipher_ctx_t *cipher_d;
-    tundev_context_t *tun_ctx;
+    tundev_ctx_t *tun_ctx;
 } tcp_client_t;
 
 tcp_client_t *
-tcp_client_new(tundev_context_t *ctx, struct sockaddr *addr) {
+tcp_client_new(tundev_ctx_t *ctx, struct sockaddr *addr) {
     tcp_client_t *c = malloc(sizeof *c);
     memset(c, 0, sizeof *c);
     buffer_alloc(&c->recv_buffer, ctx->tun->mtu + CRYPTO_MAX_OVERHEAD);
@@ -63,6 +62,15 @@ tcp_client_free(tcp_client_t *c) {
     cipher_free(c->cipher_d);
     buffer_free(&c->recv_buffer);
     free(c);
+}
+
+static void
+tcp_client_reset(tcp_client_t *c) {
+    c->connect_interval = 5;
+    cipher_reset(c->cipher_e);
+    cipher_reset(c->cipher_d);
+    buffer_reset(&c->recv_buffer);
+    packet_reset(&c->packet);
 }
 
 static void
@@ -155,11 +163,8 @@ keepalive(uv_timer_t *handle) {
         }
         return;
     }
-    size_t len = sizeof(struct iphdr) + 1;
     buffer_t buf;
-    buffer_alloc(&buf, len);
-    buf.len = len;
-    construct_keepalive_packet(c->tun_ctx->tun, buf.data);
+    packet_construct_keepalive(&buf, c->tun_ctx->tun);
     tcp_send(&c->inet_tcp.stream, &buf, c->cipher_e);
 }
 
@@ -167,14 +172,11 @@ static void
 connect_cb(uv_connect_t *req, int status) {
     tcp_client_t *c = container_of(req, tcp_client_t, connect_req);
     if (status == 0) {
-        c->connect_interval = 5;
         c->status = CONNECTED;
         uv_timer_stop(&c->timer_reconnect);
-        cipher_reset(c->cipher_e);
-        cipher_reset(c->cipher_d);
-        buffer_reset(&c->recv_buffer);
-        packet_reset(&c->packet);
+        tcp_client_reset(c);
         tcp_client_recv(c);
+
     } else {
         if (status != UV_ECANCELED) {
             logger_log(LOG_ERR, "Connect to server failed (%d: %s)",
@@ -202,6 +204,7 @@ tcp_client_connect(tcp_client_t *c) {
     }
 
 #ifdef ANDROID
+    extern int protect_socket(int fd);
     rc = protect_socket(c->inet_tcp_fd);
     logger_log(rc ? LOG_INFO : LOG_ERR, "Protect socket %s",
                rc ? "successful" : "failed");
@@ -213,7 +216,7 @@ tcp_client_connect(tcp_client_t *c) {
 
     rc = uv_tcp_connect(&c->connect_req, &c->inet_tcp.tcp, c->server_addr, connect_cb);
     if (rc) {
-        /* TODO: start timer */
+        /* TODO: reconnect */
         logger_log(LOG_ERR, "Connect to server error (%d: %s)",
                    rc, uv_strerror(rc));
     } else {

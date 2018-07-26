@@ -5,9 +5,9 @@
 #include "buffer.h"
 
 typedef struct udp udp_t;
-typedef struct tundev_context tundev_context_t;
+typedef struct tundev_ctx tundev_ctx_t;
 
-udp_t *udp_new(tundev_context_t *tun, struct sockaddr *addr);
+udp_t *udp_new(tundev_ctx_t *tun, struct sockaddr *addr);
 void udp_free();
 int udp_start(udp_t *udp, uv_loop_t *loop);
 void udp_stop(udp_t *udp);

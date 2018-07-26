@@ -3,7 +3,7 @@
 
 #include "util.h"
 #include "packet.h"
-
+#include "tun.h"
 
 int
 packet_parse(struct packet *packet, buffer_t *buf, cipher_ctx_t *ctx) {
@@ -50,4 +50,23 @@ void
 packet_reset(packet_t *packet) {
     packet->buf = NULL;
     packet->size = 0;
+}
+
+int
+packet_is_keepalive(buffer_t *buf) {
+    return (buf->len == sizeof(struct iphdr) + strlen(XTUN_KEEPALIVE)) &&
+            !strncmp((char *)(buf->data + sizeof(struct iphdr)),
+                     XTUN_KEEPALIVE, strlen(XTUN_KEEPALIVE));
+}
+
+void
+packet_construct_keepalive(buffer_t *buf, tundev_t *tun) {
+    size_t len = sizeof(struct iphdr) + strlen(XTUN_KEEPALIVE);
+    buffer_alloc(buf, len + CRYPTO_MAX_OVERHEAD);
+    memset(buf->data, 0, len);
+    buf->len = len;
+    struct iphdr *iphdr = (struct iphdr *)buf->data;
+    iphdr->saddr = tun->addr;
+    iphdr->daddr = tun->network;
+    memcpy(buf->data + sizeof *iphdr, XTUN_KEEPALIVE, strlen(XTUN_KEEPALIVE));
 }

@@ -6,57 +6,44 @@
 
 
 int
-packet_parse(buffer_t *buf, struct packet *packet, cipher_ctx_t *ctx) {
-    int off = 0;
+packet_parse(struct packet *packet, buffer_t *buf, cipher_ctx_t *ctx) {
     buffer_t tmp;
-    for (;;) {
-        if (buf->off == 0) {
 
-        }
-
+    if (packet->size == 0) {
         size_t hdrsz = cipher_overhead(ctx) + PACKET_HEADER_BYTES;
-        if (buf->len - off < hdrsz) {
+        if (buf->len < hdrsz) {
             return PACKET_UNCOMPLETE;
         }
 
-        uint8_t hdrbuf[hdrsz];
-        memcpy(hdrbuf, buf->data, hdrsz);
-        tmp.data = hdrbuf;
+        tmp.data = buf->data;
         tmp.len = hdrsz;
-
         if (crypto_decrypt(&tmp, ctx)) {
-            printf("%s - 1 len: %ld\n", __func__, hdrsz);
-            dump_hex(buf->data, hdrsz, "hdr");
             return PACKET_INVALID;
         }
         assert(tmp.len == PACKET_HEADER_BYTES);
 
-        int size = read_size(tmp.data);
-        if (size > PACKET_BUFFER_SIZE || size <= CRYPTO_MIN_OVERHEAD) {
-            printf("%s - 2\n", __func__);
+        packet->size = read_size(tmp.data);
+        if (packet->size > PACKET_BUFFER_SIZE || packet->size <= CRYPTO_MIN_OVERHEAD) {
             return PACKET_INVALID;
         }
 
-        off += hdrsz;
-
-        if (buf->len - off < size) {
-            return PACKET_UNCOMPLETE;
-        }
-
-        tmp.data = buf->data + off;
-        tmp.len = size;
-        if (crypto_decrypt(&tmp, ctx)) {
-            printf("%s - 3 off: %d len: %d\n", __func__, off, size);
-            return PACKET_INVALID;
-        }
-        packet->buf = tmp.data;
-        packet->size = tmp.len;
-
-        off += size;
-        buf->off = off;
-
-        return PACKET_COMPLETED;
+        buf->off += hdrsz;
     }
+
+    if (buf->len - buf->off < packet->size) {
+        return PACKET_UNCOMPLETE;
+    }
+
+    tmp.data = buf->data + buf->off;
+    tmp.len = packet->size;
+    buf->off += packet->size;
+    if (crypto_decrypt(&tmp, ctx)) {
+        return PACKET_INVALID;
+    }
+    packet->buf = tmp.data;
+    packet->size = tmp.len;
+
+    return PACKET_COMPLETED;
 }
 
 void

@@ -16,6 +16,7 @@
    1492 (Ethernet) - 20 (IPv4, or 40 for IPv6) - 20 (TCP) - 42 (xTun) */
 #define MTU 1410
 
+#define XTUN_MIN_MTU    1410
 #define XTUN_MAX_MTU    10000
 
 #define HASHSIZE 256

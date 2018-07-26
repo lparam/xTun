@@ -18,6 +18,7 @@ typedef struct packet {
     uint8_t *buf;
 } packet_t;
 
-int packet_parse(buffer_t *buf, struct packet *packet, cipher_ctx_t *ctx);
+int packet_parse(struct packet *packet, buffer_t *buf, cipher_ctx_t *ctx);
+void packet_reset(packet_t *packet);
 
 #endif // for #ifndef PACKET_H

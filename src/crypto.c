@@ -112,9 +112,9 @@ encrypt(buffer_t *plaintext, cipher_ctx_t *ctx, int reset) {
 
     buffer_realloc(plaintext, clen, clen);
     memcpy(plaintext->data, ciphertext, clen);
-    if (plaintext->len == 2) {
-        dump_hex(ciphertext, clen, "hdr encrypt");
-    }
+    // if (plaintext->len == 2) {
+    //     dump_hex(ciphertext, clen, "hdr encrypt");
+    // }
     plaintext->len = clen;
 
     return rc;
@@ -133,9 +133,9 @@ decrypt(buffer_t *ciphertext, cipher_ctx_t *ctx, int reset) {
     }
 
     size_t mlen = ciphertext->len - salt_off - crypto_aead_chacha20poly1305_IETF_ABYTES;
-    if (mlen == 2) {
-        dump_hex(ciphertext->data, ciphertext->len, "hdr decrypt");
-    }
+    // if (mlen == 2) {
+    //     dump_hex(ciphertext->data, ciphertext->len, "hdr decrypt");
+    // }
 
     // dump_hex(ctx->key, sizeof ctx->key, "decrypt key");
     unsigned long long long_mlen = 0;

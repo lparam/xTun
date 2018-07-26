@@ -6,7 +6,6 @@
 
 typedef struct buffer {
     int off;
-    int size; // for TCP packet
     size_t capacity;
     size_t len;
     uint8_t *data;

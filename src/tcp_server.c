@@ -22,6 +22,7 @@ typedef struct {
     } handle;
     struct sockaddr addr;
     buffer_t recv_buffer;
+    packet_t packet;
     cipher_ctx_t *cipher_e;
     cipher_ctx_t *cipher_d;
     peer_t *peer;
@@ -43,6 +44,7 @@ client_new(size_t mtu) {
     client_t *c = malloc(sizeof(*c));
     memset(c, 0, sizeof(*c));
     buffer_alloc(&c->recv_buffer, mtu + CRYPTO_MAX_OVERHEAD);
+    packet_reset(&c->packet);
     c->cipher_e = cipher_new();
     c->cipher_d = cipher_new();
     return c;
@@ -113,17 +115,14 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     if (nread > 0) {
         client->recv_buffer.len += nread;
         for (;;) {
-            packet_t packet = {
-                .size = 0,
-            };
-            int rc = packet_parse(&client->recv_buffer, &packet, client->cipher_d);
+            int rc = packet_parse(&client->packet, &client->recv_buffer, client->cipher_d);
             if (rc == PACKET_UNCOMPLETE) {
                 return;
             } else if (rc == PACKET_INVALID) {
                 goto error;
             }
 
-            struct iphdr *iphdr = (struct iphdr *) packet.buf;
+            struct iphdr *iphdr = (struct iphdr *) client->packet.buf;
 
             in_addr_t client_network = iphdr->saddr & htonl(ctx->tun->netmask);
             if (client_network != ctx->tun->network) {
@@ -160,22 +159,21 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
             }
 
             buffer_t tmp;
-            tmp.data = packet.buf;
-            tmp.len = packet.size;
+            tmp.data = client->packet.buf;
+            tmp.len = client->packet.size;
             if (is_keepalive_packet(&tmp) != 1) { // keepalive
-                tun_write(ctx->tunfd, packet.buf, packet.size);
+                tun_write(ctx->tunfd, client->packet.buf, client->packet.size);
             }
 
             int remain = client->recv_buffer.len - client->recv_buffer.off;
             assert(remain >= 0);
-            printf("nread: %ld len: %ld off: %d remain: %d\n",
-                    nread, client->recv_buffer.len, client->recv_buffer.off, remain);
             if (remain > 0) {
                 memmove(client->recv_buffer.data,
                         client->recv_buffer.data + client->recv_buffer.off, remain);
             }
             client->recv_buffer.len = remain;
             client->recv_buffer.off = 0;
+            packet_reset(&client->packet);
         }
 
     } else if (nread < 0) {

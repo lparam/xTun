@@ -40,11 +40,6 @@ tcp_send(uv_stream_t *stream, buffer_t *buf, cipher_ctx_t *ctx) {
     *buf_hdr = uv_buf_init((char *) hdr.data, hdr.len);
     *buf_data = uv_buf_init((char *) buf->data, buf->len);
 
-    // if (mode == xTUN_CLIENT) {
-    //     dump_hex(hdr.data, hdr.len, "hdr");
-    //     dump_hex(buf->data, buf->len, "data");
-    // }
-
     uv_buf_t bufs[2] = {
         *buf_hdr,
         *buf_data,

@@ -47,6 +47,7 @@ tcp_client_new(tundev_context_t *ctx, struct sockaddr *addr) {
     tcp_client_t *c = malloc(sizeof *c);
     memset(c, 0, sizeof *c);
     buffer_alloc(&c->recv_buffer, ctx->tun->mtu + CRYPTO_MAX_OVERHEAD);
+    packet_reset(&c->packet);
     c->cipher_e = cipher_new();
     c->cipher_d = cipher_new();
     c->connect_interval = 5;
@@ -103,27 +104,23 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     if (nread > 0) {
         client->recv_buffer.len += nread;
         for (;;) {
-            packet_t packet = {
-                .size = 0,
-            };
-            int rc = packet_parse(&client->recv_buffer, &packet, client->cipher_d);
+            int rc = packet_parse(&client->packet, &client->recv_buffer, client->cipher_d);
             if (rc == PACKET_UNCOMPLETE) {
                 return;
             } else if (rc == PACKET_INVALID) {
                 goto error;
             }
 
-            tun_write(client->tun_ctx->tunfd, packet.buf, packet.size);
+            tun_write(client->tun_ctx->tunfd, client->packet.buf, client->packet.size);
 
             int remain = client->recv_buffer.len - client->recv_buffer.off;
             if (remain > 0) {
-                printf("remain: %d\n", remain);
                 memmove(client->recv_buffer.data,
-                        client->recv_buffer.data + client->recv_buffer.off,
-                        remain);
+                        client->recv_buffer.data + client->recv_buffer.off, remain);
             }
             client->recv_buffer.len = remain;
             client->recv_buffer.off = 0;
+            packet_reset(&client->packet);
         }
 
     } else if (nread < 0) {
@@ -176,6 +173,7 @@ connect_cb(uv_connect_t *req, int status) {
         cipher_reset(c->cipher_e);
         cipher_reset(c->cipher_d);
         buffer_reset(&c->recv_buffer);
+        packet_reset(&c->packet);
         tcp_client_recv(c);
     } else {
         if (status != UV_ECANCELED) {

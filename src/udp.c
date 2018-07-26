@@ -32,8 +32,8 @@ typedef struct udp {
     uv_udp_t inet_udp;
     uv_timer_t timer_keepalive;
     buffer_t recv_buffer;
-    tundev_context_t *tun_ctx;
     cipher_ctx_t *cipher;
+    tundev_context_t *tun_ctx;
 } udp_t;
 
 udp_t *
@@ -201,14 +201,9 @@ udp_start(udp_t *udp, uv_loop_t *loop) {
     return uv_udp_recv_start(&udp->inet_udp, inet_alloc_cb, inet_recv_cb);
 }
 
-static void
-close_cb(uv_handle_t *handle) {
-    // udp_t *udp = container_of(handle, udp_t, inet_udp);
-}
-
 void
 udp_stop(udp_t *udp) {
-    uv_close((uv_handle_t *) &udp->inet_udp, close_cb);
+    uv_close((uv_handle_t *) &udp->inet_udp, NULL);
     if (mode == xTUN_CLIENT) {
         if (udp->keepalive_interval) {
             uv_close((uv_handle_t *) &udp->timer_keepalive, NULL);

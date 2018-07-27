@@ -70,9 +70,9 @@ route(buffer_t *tunbuf, tundev_ctx_t *ctx) {
     }
 
     if (mode == xTUN_SERVER) {
-        uv_rwlock_rdlock(&rwlock);
+        uv_rwlock_rdlock(&peers_rwlock);
         peer_t *peer = peer_lookup(iphdr->daddr, peers);
-        uv_rwlock_rdunlock(&rwlock);
+        uv_rwlock_rdunlock(&peers_rwlock);
         if (peer) {
             // TODO: use peerops_t
             assert(peer->protocol == xTUN_TCP || peer->protocol == xTUN_UDP);
@@ -499,7 +499,7 @@ tun_run(tundev_t *tun, const char *server, int port) {
     uv_loop_t *loop = uv_default_loop();
 
     if (mode == xTUN_SERVER) {
-        uv_rwlock_init(&rwlock);
+        uv_rwlock_init(&peers_rwlock);
         uv_rwlock_init(&clients_rwlock);
         peer_init(peers);
     }
@@ -556,7 +556,7 @@ tun_run(tundev_t *tun, const char *server, int port) {
     }
 
     if (mode == xTUN_SERVER) {
-        uv_rwlock_destroy(&rwlock);
+        uv_rwlock_destroy(&peers_rwlock);
         uv_rwlock_destroy(&clients_rwlock);
         peer_destroy(peers);
     }

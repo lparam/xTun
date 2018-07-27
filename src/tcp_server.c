@@ -88,7 +88,9 @@ client_close(client_t *c) {
         c->peer = NULL;
     }
     uv_close(&c->handle.handle, client_close_cb);
+    uv_rwlock_wrlock(&clients_rwlock);
     RB_REMOVE(client_tree, &clients, c);
+    uv_rwlock_wrunlock(&clients_rwlock);
 }
 
 tcp_server_t *
@@ -151,18 +153,18 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
             }
 
             if (client->peer == NULL) {
-                uv_rwlock_rdlock(&rwlock);
+                uv_rwlock_rdlock(&peers_rwlock);
                 peer_t *peer = peer_lookup(iphdr->saddr, peers);
-                uv_rwlock_rdunlock(&rwlock);
+                uv_rwlock_rdunlock(&peers_rwlock);
                 if (peer == NULL) {
                     char saddr[24] = {0}, daddr[24] = {0};
                     parse_addr(iphdr, saddr, daddr);
                     logger_log(LOG_NOTICE, "[TCP] Cache miss: %s -> %s",
                                saddr, daddr);
 
-                    uv_rwlock_wrlock(&rwlock);
+                    uv_rwlock_wrlock(&peers_rwlock);
                     peer = peer_add(iphdr->saddr, &client->addr, peers);
-                    uv_rwlock_wrunlock(&rwlock);
+                    uv_rwlock_wrunlock(&peers_rwlock);
 
                 } else {
                     if (peer->data) {

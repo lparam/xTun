@@ -55,7 +55,7 @@ typedef struct tundev {
 } tundev_t;
 
 uv_rwlock_t clients_rwlock;
-uv_rwlock_t rwlock;
+uv_rwlock_t peers_rwlock;
 peer_t *peers[HASHSIZE];
 
 int verbose;

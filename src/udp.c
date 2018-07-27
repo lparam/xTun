@@ -86,16 +86,16 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
         }
 
         // TODO: Compare source address
-        uv_rwlock_rdlock(&rwlock);
+        uv_rwlock_rdlock(&peers_rwlock);
         peer_t *peer = peer_lookup(iphdr->saddr, peers);
-        uv_rwlock_rdunlock(&rwlock);
+        uv_rwlock_rdunlock(&peers_rwlock);
         if (peer == NULL) {
             char saddr[24] = {0}, daddr[24] = {0};
             parse_addr(iphdr, saddr, daddr);
             logger_log(LOG_NOTICE, "[UDP] Cache miss: %s -> %s", saddr, daddr);
-            uv_rwlock_wrlock(&rwlock);
+            uv_rwlock_wrlock(&peers_rwlock);
             peer = peer_add(iphdr->saddr, (struct sockaddr *) addr, peers);
-            uv_rwlock_wrunlock(&rwlock);
+            uv_rwlock_wrunlock(&peers_rwlock);
 
         } else {
             if (memcmp(&peer->remote_addr, addr, sizeof(*addr))) {

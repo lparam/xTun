@@ -80,7 +80,7 @@ timer_expire(uv_timer_t *handle) {
 }
 
 static void
-reconnect(tcp_client_t *c) {
+tcp_client_reconnect(tcp_client_t *c) {
     c->connect_interval *= 2;
     int timeout = c->connect_interval < MAX_RETRY_INTERVAL ?
                   c->connect_interval : MAX_RETRY_INTERVAL;
@@ -94,7 +94,7 @@ close_cb(uv_handle_t *handle) {
 }
 
 static void
-tcp_client_disconnect(tcp_client_t *c) {
+tcp_client_close(tcp_client_t *c) {
     uv_close(&c->inet_tcp.handle, close_cb);
 }
 
@@ -107,48 +107,47 @@ alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
 
 static void
 recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
-    tcp_client_t *client = container_of(stream, tcp_client_t, inet_tcp);
+    tcp_client_t *c = container_of(stream, tcp_client_t, inet_tcp);
 
-    if (nread > 0) {
-        client->recv_buffer.len += nread;
-        for (;;) {
-            int rc = packet_parse(&client->packet, &client->recv_buffer, client->cipher_d);
-            if (rc == PACKET_UNCOMPLETE) {
-                return;
-            } else if (rc == PACKET_INVALID) {
-                goto error;
+    if (nread <= 0) {
+        if (nread < 0) {
+            if (nread != UV_EOF) {
+                logger_log(LOG_ERR, "Receive from server failed (%d: %s)",
+                        nread, uv_strerror(nread));
+            } else {
+                logger_log(LOG_INFO, "Server close");
             }
-
-            tun_write(client->tun_ctx->tunfd, client->packet.buf, client->packet.size);
-
-            int remain = client->recv_buffer.len - client->recv_buffer.off;
-            if (remain > 0) {
-                memmove(client->recv_buffer.data,
-                        client->recv_buffer.data + client->recv_buffer.off, remain);
-            }
-            client->recv_buffer.len = remain;
-            client->recv_buffer.off = 0;
-            packet_reset(&client->packet);
+            tcp_client_close(c);
         }
-
-    } else if (nread < 0) {
-        if (nread != UV_EOF) {
-            logger_log(LOG_ERR, "Receive from server failed (%d: %s)",
-                       nread, uv_strerror(nread));
-        } else {
-            logger_log(LOG_INFO, "Server close");
-        }
-        tcp_client_disconnect(client);
+        return;
     }
 
-    return;
+    c->recv_buffer.len += nread;
+    for (;;) {
+        int rc = packet_parse(&c->packet, &c->recv_buffer, c->cipher_d);
+        if (rc == PACKET_UNCOMPLETE) {
+            break;
+        } else if (rc == PACKET_INVALID) {
+            logger_log(LOG_ERR, "Invalid tcp packet");
+            if (verbose) {
+                dump_hex(c->recv_buffer.data, c->recv_buffer.len,
+                         "Invalid tcp Packet");
+            }
+            tcp_client_close(c);
+            break;
+        }
 
-error:
-    logger_log(LOG_ERR, "Invalid tcp packet");
-    if (verbose) {
-        dump_hex(client->recv_buffer.data, client->recv_buffer.len, "Invalid tcp Packet");
+        tun_write(c->tun_ctx->tunfd, c->packet.buf, c->packet.size);
+
+        int remain = c->recv_buffer.len - c->recv_buffer.off;
+        if (remain > 0) {
+            memmove(c->recv_buffer.data,
+                    c->recv_buffer.data + c->recv_buffer.off, remain);
+        }
+        c->recv_buffer.len = remain;
+        c->recv_buffer.off = 0;
+        packet_reset(&c->packet);
     }
-    tcp_client_disconnect(client);
 }
 
 static void
@@ -184,7 +183,7 @@ connect_cb(uv_connect_t *req, int status) {
             logger_log(LOG_ERR, "Connect to server failed (%d: %s)",
                        status, uv_strerror(status));
             uv_close(&c->inet_tcp.handle, NULL);
-            reconnect(c);
+            tcp_client_reconnect(c);
         }
     }
 }
@@ -206,7 +205,6 @@ tcp_client_connect(tcp_client_t *c) {
     }
 
 #ifdef ANDROID
-    extern int protect_socket(int fd);
     rc = protect_socket(c->inet_tcp_fd);
     logger_log(rc ? LOG_INFO : LOG_ERR, "Protect socket %s",
                rc ? "successful" : "failed");
@@ -215,7 +213,6 @@ tcp_client_connect(tcp_client_t *c) {
 
     rc = uv_tcp_nodelay(&c->inet_tcp.tcp, 1);
     rc = uv_tcp_keepalive(&c->inet_tcp.tcp, 1, 60);
-
     rc = uv_tcp_connect(&c->connect_req, &c->inet_tcp.tcp, c->server_addr, connect_cb);
     if (rc) {
         /* TODO: reconnect */
@@ -254,10 +251,10 @@ tcp_client_send(tcp_client_t *c, buffer_t *buf) {
     tcp_send(&c->inet_tcp.stream, buf, c->cipher_e);
 }
 
-int tcp_client_connected(tcp_client_t *t) {
-    return t->status == CONNECTED;
+int tcp_client_connected(tcp_client_t *c) {
+    return c->status == CONNECTED;
 }
 
-int tcp_client_disconnected(tcp_client_t *t) {
-    return t->status == DISCONNECTED;
+int tcp_client_disconnected(tcp_client_t *c) {
+    return c->status == DISCONNECTED;
 }

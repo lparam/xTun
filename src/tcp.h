@@ -16,8 +16,8 @@ int tcp_client_start(tcp_client_t *c, uv_loop_t *loop);
 void tcp_client_stop(tcp_client_t *c);
 void tcp_client_connect(tcp_client_t *c);
 void tcp_client_send(tcp_client_t *c, buffer_t *buf);
-int tcp_client_connected();
-int tcp_client_disconnected();
+int tcp_client_connected(tcp_client_t *c);
+int tcp_client_disconnected(tcp_client_t *c);
 
 tcp_server_t * tcp_server_new(tundev_ctx_t *ctx, struct sockaddr *addr);
 void tcp_server_free(tcp_server_t *s);

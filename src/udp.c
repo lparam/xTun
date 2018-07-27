@@ -66,6 +66,10 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
              const struct sockaddr *addr, unsigned flags)
 {
     if (nread <= 0) {
+        if (nread < 0) {
+            logger_log(LOG_ERR, "[UDP] Receive failed (%d: %s)",
+                       nread, uv_strerror(nread));
+        }
         return;
     }
 
@@ -73,7 +77,13 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
     udp->recv_buffer.len = nread;
     int rc = crypto_decrypt_with_new_salt(&udp->recv_buffer, udp->cipher);
     if (rc) {
-        goto error;
+        char remote[INET_ADDRSTRLEN + 1];
+        int port = ip_name(addr, remote, sizeof(remote));
+        logger_log(LOG_ERR, "Invalid UDP packet from %s:%d", remote, port);
+        if (verbose) {
+            dump_hex(udp->recv_buffer.data, udp->recv_buffer.len, "Invalid udp Packet");
+        }
+        return;
     }
 
     if (mode == xTUN_SERVER) {
@@ -81,11 +91,10 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
 
         in_addr_t client_network = iphdr->saddr & htonl(udp->tun_ctx->tun->netmask);
         if (client_network != udp->tun_ctx->tun->network) {
-            char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
-            return logger_log(LOG_ERR, "Invalid peer: %s", a);
+            char *pa = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
+            return logger_log(LOG_ERR, "Invalid peer: %s", pa);
         }
 
-        // TODO: Compare source address
         uv_rwlock_rdlock(&peers_rwlock);
         peer_t *peer = peer_lookup(iphdr->saddr, peers);
         uv_rwlock_rdunlock(&peers_rwlock);
@@ -104,22 +113,12 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
         }
         peer->protocol = xTUN_UDP;
 
-        if (packet_is_keepalive(&udp->recv_buffer) == 1) { // keepalive
+        if (packet_is_keepalive(&udp->recv_buffer)) {
             return;
         }
     }
 
     tun_write(udp->tun_ctx->tunfd, udp->recv_buffer.data, udp->recv_buffer.len);
-    return;
-
-    int port = 0;
-    char remote[INET_ADDRSTRLEN + 1];
-error:
-    port = ip_name(addr, remote, sizeof(remote));
-    logger_log(LOG_ERR, "Invalid UDP packet from %s:%d", remote, port);
-    if (verbose) {
-        dump_hex(udp->recv_buffer.data, udp->recv_buffer.len, "Invalid udp Packet");
-    }
 }
 
 static void

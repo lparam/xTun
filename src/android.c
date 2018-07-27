@@ -48,66 +48,66 @@ int tun_write(int tunfd, uint8_t *buf, ssize_t len);
 
 static uint16_t
 hash_query(uint16_t port) {
-	uint32_t a = port >> 8;
-	uint32_t b = port;
-	return (a + b) % HASHSIZE;
+    uint32_t a = port >> 8;
+    uint32_t b = port;
+    return (a + b) % HASHSIZE;
 }
 
 static struct query_cache *
 cache_lookup(uint16_t port) {
-	int h = hash_query(port);
-	struct query_cache *cache = caches[h];
-	if (cache == NULL) {
-		return NULL;
+    int h = hash_query(port);
+    struct query_cache *cache = caches[h];
+    if (cache == NULL) {
+        return NULL;
     }
-	if (cache->query->udphdr.source == port) {
-		return cache;
+    if (cache->query->udphdr.source == port) {
+        return cache;
     }
-	struct query_cache *last = cache;
-	while (last->next) {
-		cache = last->next;
+    struct query_cache *last = cache;
+    while (last->next) {
+        cache = last->next;
         if (cache->query->udphdr.source == port) {
-			return cache;
-		}
-		last = cache;
-	}
-	return NULL;
+            return cache;
+        }
+        last = cache;
+    }
+    return NULL;
 }
 
 static void
 cache_remove(uint16_t port) {
-	int h = hash_query(port);
-	struct query_cache *cache = caches[h];
-	if (cache == NULL) {
-		return;
+    int h = hash_query(port);
+    struct query_cache *cache = caches[h];
+    if (cache == NULL) {
+        return;
     }
-	if (cache->query->udphdr.source == port) {
-		caches[h] = cache->next;
-		return;
+    if (cache->query->udphdr.source == port) {
+        caches[h] = cache->next;
+        return;
     }
-	struct query_cache *last = cache;
-	while (last->next) {
-		cache = last->next;
+    struct query_cache *last = cache;
+    while (last->next) {
+        cache = last->next;
         if (cache->query->udphdr.source == port) {
-			last->next = cache->next;
-		}
-		last = cache;
-	}
+            last->next = cache->next;
+        }
+        last = cache;
+    }
 }
 
 static void
 cache_insert(uint16_t port, struct dns_query *query) {
-	int h = hash_query(port);
-	struct query_cache *cache = malloc(sizeof(struct query_cache));
-	memset(cache, 0, sizeof(*cache));
+    int h = hash_query(port);
+    struct query_cache *cache = malloc(sizeof(struct query_cache));
+    memset(cache, 0, sizeof(*cache));
     cache->query = query;
-	cache->next = caches[h];
-	caches[h] = cache;
+    cache->next = caches[h];
+    caches[h] = cache;
 }
 
 void
 clear_dns_query() {
-	for (int i = 0; i < HASHSIZE; i++) {
+    for (int i = 0; i < HASHSIZE; i++) {
         struct query_cache *cache  = caches[i];
         while (cache) {
             void *tmp = cache;
@@ -115,8 +115,8 @@ clear_dns_query() {
             cache = cache->next;
             free(tmp);
         }
-		caches[i] = NULL;
-	}
+        caches[i] = NULL;
+    }
 }
 
 static struct dns_query *

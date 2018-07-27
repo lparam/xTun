@@ -15,48 +15,48 @@
 
 static int
 lockfile(int fd) {
-	struct flock fl;
+    struct flock fl;
 
-	fl.l_type = F_WRLCK;
-	fl.l_start = 0;
-	fl.l_whence = SEEK_SET;
-	fl.l_len = 0;
-	return(fcntl(fd, F_SETLK, &fl));
+    fl.l_type = F_WRLCK;
+    fl.l_start = 0;
+    fl.l_whence = SEEK_SET;
+    fl.l_len = 0;
+    return(fcntl(fd, F_SETLK, &fl));
 }
 
 int
 already_running(const char *pidfile) {
-	int	  fd;
+    int	  fd;
     char  buf[16];
 
     fd = open(pidfile, O_RDWR | O_CREAT, LOCKMODE);
-	if (fd < 0) {
-		logger_stderr("open \"%s\" failed (%d: %s)", pidfile, errno, strerror(errno));
-		exit(1);
-	}
-	if (lockfile(fd) < 0) {
-		if (errno == EACCES || errno == EAGAIN) {
-			close(fd);
-			return 1;
-		}
-		logger_stderr("can't lock %s: %s\n", pidfile, strerror(errno));
-		exit(1);
-	}
+    if (fd < 0) {
+        logger_stderr("open \"%s\" failed (%d: %s)", pidfile, errno, strerror(errno));
+        exit(1);
+    }
+    if (lockfile(fd) < 0) {
+        if (errno == EACCES || errno == EAGAIN) {
+            close(fd);
+            return 1;
+        }
+        logger_stderr("can't lock %s: %s\n", pidfile, strerror(errno));
+        exit(1);
+    }
 
     /*
      * create pid file
      */
     if (ftruncate(fd, 0)) {
-		fprintf(stderr, "can't truncate %s: %s", pidfile, strerror(errno));
-		exit(1);
+        fprintf(stderr, "can't truncate %s: %s", pidfile, strerror(errno));
+        exit(1);
     }
     sprintf(buf, "%ld\n", (long)getpid());
     if (write(fd, buf, strlen(buf)+1) == -1) {
-		fprintf(stderr, "can't write %s: %s", pidfile, strerror(errno));
-		exit(1);
+        fprintf(stderr, "can't write %s: %s", pidfile, strerror(errno));
+        exit(1);
     }
 
-	return 0;
+    return 0;
 }
 
 void

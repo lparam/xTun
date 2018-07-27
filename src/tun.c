@@ -259,42 +259,42 @@ tun_config(tundev_t *tun, const char *ifconf, int mtu) {
     tun->mtu = mtu;
     strcpy(tun->ifconf, ifconf);
 
-	char *cidr = strchr(ifconf, '/');
-	if(!cidr) {
-		logger_stderr("ifconf syntax error: %s", ifconf);
-		exit(0);
-	}
+    char *cidr = strchr(ifconf, '/');
+    if(!cidr) {
+        logger_stderr("ifconf syntax error: %s", ifconf);
+        exit(0);
+    }
 
-	uint8_t ipaddr[16] = {0};
-	memcpy(ipaddr, ifconf, (uint32_t) (cidr - ifconf));
+    uint8_t ipaddr[16] = {0};
+    memcpy(ipaddr, ifconf, (uint32_t) (cidr - ifconf));
 
-	in_addr_t netmask = 0xffffffff;
-	netmask = netmask << (32 - atoi(++cidr));
+    in_addr_t netmask = 0xffffffff;
+    netmask = netmask << (32 - atoi(++cidr));
     tun->addr = inet_addr((const char *) ipaddr);
     tun->netmask = netmask;
     tun->network = inet_addr((const char *) ipaddr) & htonl(netmask);
 
     int inet4 = socket(AF_INET, SOCK_DGRAM, 0);
-	if (inet4 < 0) {
-		logger_stderr("Can't create tun device (udp socket): %s",
-                      strerror(errno));
+    if (inet4 < 0) {
+        logger_stderr("Can't create tun device (udp socket): %s",
+          strerror(errno));
         exit(1);
-	}
+    }
 
-	struct ifreq ifr;
-	memset(&ifr, 0, sizeof ifr);
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof ifr);
     strncpy(ifr.ifr_name, tun->iface, IFNAMSIZ);
 
     struct sockaddr_in *saddr = (struct sockaddr_in *) &ifr.ifr_addr;
     saddr->sin_family = AF_INET;
     saddr->sin_addr.s_addr = inet_addr((const char *) ipaddr);
-	if(saddr->sin_addr.s_addr == INADDR_NONE) {
+    if(saddr->sin_addr.s_addr == INADDR_NONE) {
         logger_stderr("Invalid IP address: %s", ifconf);
-		exit(1);
-	}
+        exit(1);
+    }
     if(ioctl(inet4, SIOCSIFADDR, (void *) &ifr) < 0) {
         logger_stderr("ioctl(SIOCSIFADDR): %s", strerror(errno));
-		exit(1);
+        exit(1);
     }
 
     saddr = (struct sockaddr_in *)&ifr.ifr_netmask;
@@ -302,22 +302,22 @@ tun_config(tundev_t *tun, const char *ifconf, int mtu) {
     saddr->sin_addr.s_addr = htonl(netmask);
     if(ioctl(inet4, SIOCSIFNETMASK, (void *) &ifr) < 0) {
         logger_stderr("ioctl(SIOCSIFNETMASK): %s", strerror(errno));
-		exit(1);
+        exit(1);
     }
 
     /* Activate interface. */
-	ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
-	if(ioctl(inet4, SIOCSIFFLAGS, (void *) &ifr) < 0) {
+    ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
+    if(ioctl(inet4, SIOCSIFFLAGS, (void *) &ifr) < 0) {
         logger_stderr("ioctl(SIOCSIFFLAGS): %s", strerror(errno));
-		exit(1);
-	}
+        exit(1);
+    }
 
     /* Set MTU if it is specified. */
-	ifr.ifr_mtu = mtu;
-	if(ioctl(inet4, SIOCSIFMTU, (void *) &ifr) < 0) {
+    ifr.ifr_mtu = mtu;
+    if(ioctl(inet4, SIOCSIFMTU, (void *) &ifr) < 0) {
         logger_stderr("ioctl(SIOCSIFMTU): %s", strerror(errno));
-		exit(1);
-	}
+        exit(1);
+    }
 
     close(inet4);
 }
@@ -346,17 +346,17 @@ tun_config(tundev_t *tun, const char *ifconf, int fd, int mtu, int prot,
 {
     tundev_ctx_t *ctx = tun->contexts;
 
-	char *cidr = strchr(ifconf, '/');
-	if(!cidr) {
-		logger_stderr("ifconf syntax error: %s", ifconf);
-		exit(0);
-	}
+    char *cidr = strchr(ifconf, '/');
+    if(!cidr) {
+        logger_stderr("ifconf syntax error: %s", ifconf);
+        exit(0);
+    }
 
-	uint8_t ipaddr[16] = {0};
-	memcpy(ipaddr, ifconf, (uint32_t) (cidr - ifconf));
+    uint8_t ipaddr[16] = {0};
+    memcpy(ipaddr, ifconf, (uint32_t) (cidr - ifconf));
 
-	in_addr_t netmask = 0xffffffff;
-	netmask = netmask << (32 - atoi(++cidr));
+    in_addr_t netmask = 0xffffffff;
+    netmask = netmask << (32 - atoi(++cidr));
     tun->addr = inet_addr((const char *) ipaddr);
     tun->netmask = netmask;
     tun->network = inet_addr((const char *) ipaddr) & htonl(netmask);

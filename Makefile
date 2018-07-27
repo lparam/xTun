@@ -87,15 +87,15 @@ LIBS += -pthread -ldl
 
 LDFLAGS += $(LIBS)
 
-XTUN=$(OBJTREE)/xTun
-XTUN_STATIC=$(OBJTREE)/libxTun.a
+xTUN=$(OBJTREE)/xTun
+xTUN_STATIC=$(OBJTREE)/libxTun.a
 
 #########################################################################
 include $(SRCTREE)/config.mk
 #########################################################################
 
-all: libuv libsodium $(XTUN)
-android: libuv libsodium $(XTUN_STATIC)
+all: libuv libsodium $(xTUN)
+android: libuv libsodium $(xTUN_STATIC)
 
 3rd/libuv/autogen.sh:
 	$(Q)git submodule update --init
@@ -118,7 +118,7 @@ $(OBJTREE)/3rd/libsodium/Makefile: | 3rd/libsodium/autogen.sh
 
 libsodium: $(OBJTREE)/3rd/libsodium/Makefile
 
-$(XTUN): \
+$(xTUN): \
 	$(OBJTREE)/src/util.o \
 	$(OBJTREE)/src/logger.o \
 	$(OBJTREE)/src/daemon.o \
@@ -135,7 +135,7 @@ $(XTUN): \
 	$(OBJTREE)/src/main.o
 	$(LINK) $^ -o $@ $(LDFLAGS)
 
-$(XTUN_STATIC): \
+$(xTUN_STATIC): \
 	$(OBJTREE)/src/util.o \
 	$(OBJTREE)/src/logger.o \
 	$(OBJTREE)/src/buffer.o \
@@ -157,7 +157,7 @@ clean:
 	\( -name '*.o' -o -name '*~' \
 	-o -name '*.tmp' \) -print \
 	| xargs rm -f
-	@rm -f $(XTUN) $(XTUN_STATIC)
+	@rm -f $(xTUN) $(xTUN_STATIC)
 
 distclean: clean
 ifeq ($(OBJTREE)/3rd/libsodium/Makefile, $(wildcard $(OBJTREE)/3rd/libsodium/Makefile))

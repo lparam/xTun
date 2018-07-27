@@ -26,7 +26,7 @@
 #define xTUN_TCP        0x01
 #define xTUN_UDP        0x02
 
-#define XTUN_KEEPALIVE "xTun-keepalive"
+#define xTUN_KEEPALIVE "xTun-keepalive"
 
 typedef struct tundev_ctx {
     uv_poll_t        watcher;

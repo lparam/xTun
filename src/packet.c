@@ -1,5 +1,4 @@
 #include <string.h>
-#include <assert.h>
 
 #include "util.h"
 #include "packet.h"
@@ -20,7 +19,6 @@ packet_parse(packet_t *packet, buffer_t *buf, cipher_ctx_t *ctx) {
         if (crypto_decrypt(&tmp, ctx)) {
             return PACKET_INVALID;
         }
-        assert(tmp.len == PACKET_HEADER_BYTES);
 
         packet->size = read_size(tmp.data);
         if (packet->size > PACKET_BUFFER_SIZE || packet->size <= CRYPTO_MIN_OVERHEAD) {

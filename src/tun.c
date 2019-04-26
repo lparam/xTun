@@ -61,14 +61,6 @@ route(buffer_t *tunbuf, tundev_ctx_t *ctx) {
         return 1;
     }
 
-    char saddr[24] = {0}, daddr[24] = {0};
-    parse_addr(iphdr, saddr, daddr);
-    in_addr_t network = iphdr->daddr & htonl(ctx->tun->netmask);
-    if (network != ctx->tun->network) {
-        logger_log(LOG_NOTICE, "Discard %s -> %s", saddr, daddr);
-        return 1;
-    }
-
     if (mode == xTUN_SERVER) {
         uv_rwlock_rdlock(&peers_rwlock);
         peer_t *peer = peer_lookup(iphdr->daddr, peers);
@@ -83,7 +75,14 @@ route(buffer_t *tunbuf, tundev_ctx_t *ctx) {
             }
 
         } else {
-            logger_log(LOG_WARNING, "Peer is not connected: %s -> %s", saddr, daddr);
+            char saddr[24] = {0}, daddr[24] = {0};
+            parse_addr(iphdr, saddr, daddr);
+            in_addr_t network = iphdr->daddr & htonl(ctx->tun->netmask);
+            if (network != ctx->tun->network) {
+                logger_log(LOG_NOTICE, "Discard %s -> %s", saddr, daddr);
+            } else {
+                logger_log(LOG_WARNING, "Peer is not connected: %s -> %s", saddr, daddr);
+            }
             return 1;
         }
 

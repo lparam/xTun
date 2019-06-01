@@ -40,14 +40,13 @@ log2std(FILE *file, const char *msg) {
 
 void
 logger_log(uint32_t level, const char *msg, ...) {
-	char tmp[LOG_MESSAGE_SIZE];
+    char tmp[LOG_MESSAGE_SIZE];
     char m[LOG_MESSAGE_SIZE + 64] = { 0 };
 
-
-	va_list ap;
-	va_start(ap, msg);
-	vsnprintf(tmp, LOG_MESSAGE_SIZE, msg, ap);
-	va_end(ap);
+    va_list ap;
+    va_start(ap, msg);
+    vsnprintf(tmp, LOG_MESSAGE_SIZE, msg, ap);
+    va_end(ap);
 
     if (_syslog) {
         syslog(level, "<%s> %s\n", levels[level], tmp);
@@ -85,12 +84,12 @@ logger_stderr(const char *msg, ...) {
     time_t curtime = time(NULL);
     struct tm *loctime = localtime(&curtime);
 
-	char tmp[LOG_MESSAGE_SIZE];
+    char tmp[LOG_MESSAGE_SIZE];
 
-	va_list ap;
-	va_start(ap, msg);
-	vsnprintf(tmp, LOG_MESSAGE_SIZE, msg, ap);
-	va_end(ap);
+    va_list ap;
+    va_start(ap, msg);
+    vsnprintf(tmp, LOG_MESSAGE_SIZE, msg, ap);
+    va_end(ap);
 
     strftime(timestr, 20, "%Y/%m/%d %H:%M:%S", loctime);
     char m[300] = { 0 };

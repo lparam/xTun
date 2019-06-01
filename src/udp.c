@@ -16,7 +16,6 @@
 
 #include "util.h"
 #include "logger.h"
-#include "common.h"
 #include "crypto.h"
 #include "peer.h"
 #include "tun.h"
@@ -31,15 +30,17 @@ typedef struct udp {
     int inet_udp_fd;
     uv_udp_t inet_udp;
     uv_timer_t timer_keepalive;
-    uint8_t *recv_buffer;
-    tundev_context_t *tun_ctx;
+    buffer_t recv_buffer;
+    cipher_ctx_t *cipher;
+    tundev_ctx_t *tun_ctx;
 } udp_t;
 
 udp_t *
-udp_new(tundev_context_t *ctx, struct sockaddr *addr) {
+udp_new(tundev_ctx_t *ctx, struct sockaddr *addr) {
     udp_t *udp = malloc(sizeof *udp);
     memset(udp, 0, sizeof *udp);
-    udp->recv_buffer = malloc(ctx->tun->mtu + PRIMITIVE_BYTES);
+    udp->cipher = cipher_new();
+    buffer_alloc(&udp->recv_buffer, ctx->tun->mtu + CRYPTO_MAX_OVERHEAD);
     udp->addr = addr;
     udp->tun_ctx = ctx;
     udp->keepalive_interval = ctx->tun->keepalive_interval;
@@ -48,19 +49,16 @@ udp_new(tundev_context_t *ctx, struct sockaddr *addr) {
 
 void
 udp_free(udp_t *udp) {
+    cipher_free(udp->cipher);
+    buffer_free(&udp->recv_buffer);
     free(udp);
-}
-
-void
-udp_associate(void *data) {
-
 }
 
 static void
 inet_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
     udp_t *udp = container_of(handle, udp_t, inet_udp);
-    buf->base = (char *) udp->recv_buffer;
-    buf->len = udp->tun_ctx->tun->mtu + PRIMITIVE_BYTES;
+    buf->base = (char *)udp->recv_buffer.data;
+    buf->len = udp->recv_buffer.capacity;
 }
 
 static void
@@ -68,44 +66,45 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
              const struct sockaddr *addr, unsigned flags)
 {
     if (nread <= 0) {
+        if (nread < 0) {
+            logger_log(LOG_ERR, "[UDP] Receive failed (%d: %s)",
+                       nread, uv_strerror(nread));
+        }
         return;
     }
 
     udp_t *udp = container_of(handle, udp_t, inet_udp);
-
-    uint8_t *m = (uint8_t *)buf->base;
-    ssize_t mlen = nread - PRIMITIVE_BYTES;
-
-    int valid = mlen > 0 && mlen <= udp->tun_ctx->tun->mtu;
-    if (!valid) {
-        goto error;
-    }
-
-    int rc = crypto_decrypt(m, (uint8_t *)buf->base, nread);
+    udp->recv_buffer.len = nread;
+    int rc = crypto_decrypt_with_new_salt(&udp->recv_buffer, udp->cipher);
     if (rc) {
-        goto error;
+        char remote[INET_ADDRSTRLEN + 1];
+        int port = ip_name(addr, remote, sizeof(remote));
+        logger_log(LOG_ERR, "Invalid UDP packet from %s:%d", remote, port);
+        if (verbose) {
+            dump_hex(udp->recv_buffer.data, udp->recv_buffer.len, "Invalid udp Packet");
+        }
+        return;
     }
 
     if (mode == xTUN_SERVER) {
-        struct iphdr *iphdr = (struct iphdr *) m;
+        struct iphdr *iphdr = (struct iphdr *) udp->recv_buffer.data;
 
         in_addr_t client_network = iphdr->saddr & htonl(udp->tun_ctx->tun->netmask);
         if (client_network != udp->tun_ctx->tun->network) {
-            char *a = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
-            return logger_log(LOG_ERR, "Invalid client: %s", a);
+            char *pa = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
+            return logger_log(LOG_ERR, "Invalid peer: %s", pa);
         }
 
-        // TODO: Compare source address
-        uv_rwlock_rdlock(&rwlock);
-        peer_t *peer = lookup_peer(iphdr->saddr, peers);
-        uv_rwlock_rdunlock(&rwlock);
+        uv_rwlock_rdlock(&peers_rwlock);
+        peer_t *peer = peer_lookup(iphdr->saddr, peers);
+        uv_rwlock_rdunlock(&peers_rwlock);
         if (peer == NULL) {
             char saddr[24] = {0}, daddr[24] = {0};
             parse_addr(iphdr, saddr, daddr);
             logger_log(LOG_NOTICE, "[UDP] Cache miss: %s -> %s", saddr, daddr);
-            uv_rwlock_wrlock(&rwlock);
-            peer = save_peer(iphdr->saddr, (struct sockaddr *) addr, peers);
-            uv_rwlock_wrunlock(&rwlock);
+            uv_rwlock_wrlock(&peers_rwlock);
+            peer = peer_add(iphdr->saddr, (struct sockaddr *) addr, peers);
+            uv_rwlock_wrunlock(&peers_rwlock);
 
         } else {
             if (memcmp(&peer->remote_addr, addr, sizeof(*addr))) {
@@ -114,22 +113,12 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
         }
         peer->protocol = xTUN_UDP;
 
-        if (is_keepalive_packet(m, mlen) == 1) { // keepalive
+        if (packet_is_keepalive(&udp->recv_buffer)) {
             return;
         }
     }
 
-    tun_write(udp->tun_ctx->tunfd, m, mlen);
-    return;
-
-    int port = 0;
-    char remote[INET_ADDRSTRLEN + 1];
-error:
-    port = ip_name(addr, remote, sizeof(remote));
-    logger_log(LOG_ERR, "Invalid UDP packet from %s:%d", remote, port);
-    if (verbose) {
-        dump_hex(buf->base, nread, "Invalid udp Packet");
-    }
+    tun_write(udp->tun_ctx->tunfd, udp->recv_buffer.data, udp->recv_buffer.len);
 }
 
 static void
@@ -139,32 +128,32 @@ inet_send_cb(uv_udp_send_t *req, int status) {
                    status, uv_strerror(status));
     }
     uv_buf_t *buf = (uv_buf_t *) (req + 1);
-    free(buf->base);
+    buffer_t *data = container_of(&buf->base, buffer_t, data);
+    buffer_free(data);
     free(req);
 }
 
 void
-udp_send(udp_t *udp, uint8_t *buf, int len, struct sockaddr *addr) {
+udp_send(udp_t *udp, buffer_t *buf, struct sockaddr *addr) {
+    crypto_encrypt_with_new_salt(buf, udp->cipher);
     uv_udp_send_t *write_req = malloc(sizeof(*write_req) + sizeof(uv_buf_t));
     uv_buf_t *outbuf = (uv_buf_t *) (write_req + 1);
-    outbuf->base = (char *) buf;
-    outbuf->len = len;
+    outbuf->base = (char *) buf->data;
+    outbuf->len = buf->len;
     int rc = uv_udp_send(write_req, &udp->inet_udp, outbuf, 1,
                          mode == xTUN_SERVER ? addr : udp->addr, inet_send_cb);
     if (rc) {
         logger_log(LOG_ERR, "UDP Write error (%d: %s)", rc, uv_strerror(rc));
-        free(buf);
+        buffer_free(buf);
     }
 }
 
 static void
 keepalive(uv_timer_t *handle) {
     udp_t *udp = container_of(handle, udp_t, timer_keepalive);
-    size_t len = sizeof(struct iphdr) + PRIMITIVE_BYTES + 1;
-    uint8_t *buf = calloc(1, len);
-    construct_keepalive_packet(udp->tun_ctx->tun, buf + PRIMITIVE_BYTES);
-    crypto_encrypt(buf, buf + PRIMITIVE_BYTES, len - PRIMITIVE_BYTES);
-    udp_send(udp, buf, len, NULL);
+    buffer_t buf;
+    packet_construct_keepalive(&buf, udp->tun_ctx->tun);
+    udp_send(udp, &buf, NULL);
 }
 
 int
@@ -184,6 +173,7 @@ udp_start(udp_t *udp, uv_loop_t *loop) {
     }
 
 #ifdef ANDROID
+        extern int protect_socket(int fd);
         rc = protect_socket(udp->inet_udp_fd);
         logger_log(rc ? LOG_INFO : LOG_ERR, "Protect socket %s",
                    rc ? "successful" : "failed");
@@ -207,15 +197,9 @@ udp_start(udp_t *udp, uv_loop_t *loop) {
     return uv_udp_recv_start(&udp->inet_udp, inet_alloc_cb, inet_recv_cb);
 }
 
-static void
-close_cb(uv_handle_t *handle) {
-    udp_t *udp = container_of(handle, udp_t, inet_udp);
-    free(udp->recv_buffer);
-}
-
 void
 udp_stop(udp_t *udp) {
-    uv_close((uv_handle_t *) &udp->inet_udp, close_cb);
+    uv_close((uv_handle_t *) &udp->inet_udp, NULL);
     if (mode == xTUN_CLIENT) {
         if (udp->keepalive_interval) {
             uv_close((uv_handle_t *) &udp->timer_keepalive, NULL);

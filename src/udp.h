@@ -2,9 +2,15 @@
 #define _UDP_H
 
 #include "uv.h"
+#include "buffer.h"
 
-int udp_start(struct tundev_context *ctx, uv_loop_t *loop);
-void udp_stop(struct tundev_context *ctx);
-void udp_send(struct tundev_context *ctx, uint8_t *buf, int len, struct sockaddr *addr);
+typedef struct udp udp_t;
+typedef struct tundev_ctx tundev_ctx_t;
+
+udp_t *udp_new(tundev_ctx_t *tun, struct sockaddr *addr);
+void udp_free();
+int udp_start(udp_t *udp, uv_loop_t *loop);
+void udp_stop(udp_t *udp);
+void udp_send(udp_t *udp, buffer_t *buf, struct sockaddr *addr);
 
 #endif // for #ifndef _UDP_H

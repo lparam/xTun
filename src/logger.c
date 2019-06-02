@@ -15,6 +15,7 @@
 
 #define LOG_MESSAGE_SIZE 256
 
+static int _clean = 0;
 static int _syslog = 0;
 
 #ifdef _MSC_VER
@@ -39,15 +40,20 @@ log2std(FILE *file, const char *msg) {
 
 void
 logger_log(uint32_t level, const char *msg, ...) {
-	char tmp[LOG_MESSAGE_SIZE];
+    char tmp[LOG_MESSAGE_SIZE];
+    char m[LOG_MESSAGE_SIZE + 64] = { 0 };
 
-	va_list ap;
-	va_start(ap, msg);
-	vsnprintf(tmp, LOG_MESSAGE_SIZE, msg, ap);
-	va_end(ap);
+    va_list ap;
+    va_start(ap, msg);
+    vsnprintf(tmp, LOG_MESSAGE_SIZE, msg, ap);
+    va_end(ap);
 
     if (_syslog) {
-        syslog(level, "[%s] %s", levels[level], tmp);
+        syslog(level, "<%s> %s\n", levels[level], tmp);
+
+    } else if (_clean) {
+        sprintf(m, "<%s> %s\n", levels[level], tmp);
+        log2std(stdout, m);
 
     } else {
 #ifdef ANDROID
@@ -66,7 +72,6 @@ logger_log(uint32_t level, const char *msg, ...) {
         struct tm *loctime = localtime(&curtime);
         char timestr[20];
         strftime(timestr, 20, "%Y/%m/%d %H:%M:%S", loctime);
-        char m[300] = { 0 };
         sprintf(m, "%s%s [%s]\033[0m: %s\n", colors[level], timestr, levels[level], tmp);
         log2std(stdout, m);
 #endif
@@ -79,12 +84,12 @@ logger_stderr(const char *msg, ...) {
     time_t curtime = time(NULL);
     struct tm *loctime = localtime(&curtime);
 
-	char tmp[LOG_MESSAGE_SIZE];
+    char tmp[LOG_MESSAGE_SIZE];
 
-	va_list ap;
-	va_start(ap, msg);
-	vsnprintf(tmp, LOG_MESSAGE_SIZE, msg, ap);
-	va_end(ap);
+    va_list ap;
+    va_start(ap, msg);
+    vsnprintf(tmp, LOG_MESSAGE_SIZE, msg, ap);
+    va_end(ap);
 
     strftime(timestr, 20, "%Y/%m/%d %H:%M:%S", loctime);
     char m[300] = { 0 };
@@ -95,6 +100,10 @@ logger_stderr(const char *msg, ...) {
 
 int
 logger_init(int syslog) {
+    char *env_logformat = getenv("LOGFORMAT");
+    if (env_logformat != NULL && strcmp("0", env_logformat) == 0) {
+        _clean = 1;
+    }
     _syslog = syslog;
     return 0;
 }

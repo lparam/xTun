@@ -18,7 +18,7 @@
 
 static int mtu = MTU;
 static int port = 1082;
-static int keepalive = 0;
+static int keepalive_interval = 0;
 static int daemon_mode = 1;
 static uint32_t parallel = 1;
 static char *iface = "tun0";
@@ -29,6 +29,13 @@ static char *password = NULL;
 static char *xsignal;
 
 int signal_process(char *signal, const char *pidfile);
+
+enum {
+    GETOPT_MTU = 128,
+    GETOPT_KEEPALIVE,
+    GETOPT_PID,
+    GETOPT_SIGNAL
+};
 
 static const char *_optString = "i:I:k:c:sb:tp:P:nVvh";
 static const struct option _lopts[] = {
@@ -41,10 +48,10 @@ static const struct option _lopts[] = {
     { "bind",       required_argument,   NULL, 'b' },
     { "",           required_argument,   NULL, 'P' },
     { "tcp",        no_argument,         NULL, 't' },
-    { "mtu",        required_argument,   NULL,  0  },
-    { "keepalive",  required_argument,   NULL,  0  },
-    { "pid",        required_argument,   NULL,  0  },
-    { "signal",     required_argument,   NULL,  0  },
+    { "mtu",        required_argument,   NULL,  GETOPT_MTU },
+    { "keepalive",  required_argument,   NULL,  GETOPT_KEEPALIVE },
+    { "pid",        required_argument,   NULL,  GETOPT_PID },
+    { "signal",     required_argument,   NULL,  GETOPT_SIGNAL },
     { "",           no_argument,         NULL, 'n' },
     { "",           no_argument,         NULL, 'V' },
     { "version",    no_argument,         NULL, 'v' },
@@ -60,7 +67,7 @@ print_usage(const char *prog) {
     printf("Options:\n");
     puts(""
          "  -I <ifconf>\t\t CIDR of interface (e.g. 10.3.0.1/16)\n"
-         "  -k <encryption_key>\t shared password for data encryption\n"
+         "  -k <password>\t\t shared password for data encryption\n"
          "  -c --client <host>\t run in client mode, connecting to <host>\n"
          "  -s --server\t\t run in server mode\n"
          "  [-p --port <port>]\t server port to listen on/connect to (default: 1082)\n"
@@ -131,28 +138,27 @@ parse_opts(int argc, char *argv[]) {
         case '?':
             print_usage(argv[0]);
             break;
-		case 0: /* long option without a short arg */
-            if (strcmp("signal", _lopts[longindex].name) == 0) {
+        case GETOPT_MTU:
+            mtu = strtol(optarg, NULL, 10);
+            if(!mtu || mtu < 0 || mtu > 4096) {
+                mtu = MTU;
+            }
+            break;
+        case GETOPT_KEEPALIVE:
+            keepalive_interval = strtol(optarg, NULL, 10);
+            break;
+        case GETOPT_PID:
+            pidfile = optarg;
+            break;
+        case GETOPT_SIGNAL:
+            if (strcmp(optarg, "stop") == 0 || strcmp(optarg, "quit") == 0) {
                 xsignal = optarg;
-                if (strcmp(xsignal, "stop") == 0
-                  || strcmp(xsignal, "quit") == 0) {
-                    break;
-                }
-                fprintf(stderr, "invalid option: --signal %s\n", xsignal);
-                print_usage(argv[0]);
+                break;
             }
-            if (strcmp("mtu", _lopts[longindex].name) == 0) {
-                mtu = strtol(optarg, NULL, 10);
-                if(!mtu || mtu < 0 || mtu > 4096) {
-                    mtu = MTU;
-                }
-            }
-            if (strcmp("keepalive", _lopts[longindex].name) == 0) {
-                keepalive = strtol(optarg, NULL, 10);
-            }
-            if (strcmp("pid", _lopts[longindex].name) == 0) {
-                pidfile = optarg;
-            }
+            fprintf(stderr, "invalid option: --signal %s\n", optarg);
+            print_usage(argv[0]);
+            break;
+		case 0: /* long option without a short arg */
 			break;
         default:
             print_usage(argv[0]);
@@ -172,7 +178,7 @@ init() {
     signal(SIGABRT, SIG_IGN);
 
     if (crypto_init(password)) {
-        logger_stderr("crypto init failed");
+        logger_stderr("Crypto init failed");
         exit(1);
     }
 
@@ -218,20 +224,20 @@ main(int argc, char *argv[]) {
     struct sockaddr addr;
     int rc = resolve_addr(addrbuf, port, &addr);
     if (rc) {
-        logger_stderr("invalid address");
+        logger_stderr("Invalid address");
         return 1;
     }
 
-	struct tundev *tun = tun_alloc(iface, parallel);
+	tundev_t *tun = tun_alloc(iface, parallel);
     if (!tun) {
         return 1;
     }
 
-    tun_config(tun, ifconf, mtu, &addr);
-    if (keepalive) {
-        tun_keepalive(tun, 1, keepalive);
+    tun_config(tun, ifconf, mtu);
+    if (keepalive_interval) {
+        tun_keepalive(tun, 1, keepalive_interval);
     }
-    tun_start(tun);
+    tun_run(tun, addr);
 
     tun_free(tun);
     if (daemon_mode) {

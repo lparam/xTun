@@ -1,25 +1,20 @@
-#!/bin/sh /etc/rc.common
-# Copyright (C) 2006-2014 OpenWrt.org
-
-START=72
-STOP=30
-FIREWALL_RELOAD=0
+#!/bin/sh
 
 IFACE=tun0
-IP=10.0.0.2/24
-SERVER=IP
-PORT=PORT
-PASSWORD=PASSWORD
+CIDR=10.0.0.2/24
+SERVER=216.250.96.80
+PORT=1082
+PASSWORD=password
 
 IP_ROUTE_TABLE=xTun
 FWMARK="0x023/0x023"
 SETNAME=wall
 CHAIN=xTun
 DNS=8.8.8.8
-BLACK_LIST=/etc/black_list
+BLACK_LIST=black_list
 
 start() {
-    xTun -i $IFACE -I $IP -k $PASSWORD -c $SERVER -p $PORT
+    xTun -i $IFACE -I $CIDR -k $PASSWORD -c $SERVER -p $PORT
     net_start
     acl add
 }
@@ -56,7 +51,7 @@ net_start() {
         iptables -F $CHAIN
         iptables -Z $CHAIN
     )
-    iptables -I $CHAIN 1 -i $IFACE -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    iptables -I $CHAIN 1 -i $IFACE -m state --state RELATED,ESTABLISHED -j ACCEPT
     iptables -I $CHAIN 1 -o $IFACE -j ACCEPT
     iptables -I FORWARD -j $CHAIN
 
@@ -125,3 +120,32 @@ acl() {
         ipset $1 $SETNAME $line --exist
     done < $BLACK_LIST
 }
+
+show_help() {
+    echo "Usage: $ProgName <command> [options]"
+    echo "Commands:"
+    echo "    start   start tun"
+    echo "    stop    stop tun"
+    echo ""
+    echo "For help with each command run:"
+    echo "$ProgName <command> -h|--help"
+    echo ""
+}
+
+ProgName=$(basename $0)
+
+command=$1
+case $command in
+    "" | "-h" | "--help")
+        show_help
+        ;;
+    *)
+        shift
+        ${command} $@
+        if [ $? = 127 ]; then
+            echo "Error: '$command' is not a known command." >&2
+            echo "       Run '$ProgName --help' for a list of known commands." >&2
+            exit 1
+        fi
+        ;;
+esac

@@ -1,6 +1,6 @@
 MAJOR = 0
-MINOR = 5
-PATCH = 2
+MINOR = 6
+PATCH = 0
 NAME = xTun
 
 ifdef O
@@ -80,6 +80,10 @@ else
 LIBS += -lrt
 endif
 
+ifdef OPENWRT
+LIBS += -latomic
+endif
+
 LIBS += $(OBJTREE)/3rd/libuv/.libs/libuv.a
 LIBS += $(OBJTREE)/3rd/libsodium/src/libsodium/.libs/libsodium.a
 
@@ -87,15 +91,15 @@ LIBS += -pthread -ldl
 
 LDFLAGS += $(LIBS)
 
-XTUN=$(OBJTREE)/xTun
-XTUN_STATIC=$(OBJTREE)/libxTun.a
+xTUN=$(OBJTREE)/xTun
+xTUN_STATIC=$(OBJTREE)/libxTun.a
 
 #########################################################################
 include $(SRCTREE)/config.mk
 #########################################################################
 
-all: libuv libsodium $(XTUN)
-android: libuv libsodium $(XTUN_STATIC)
+all: libuv libsodium $(xTUN)
+android: libuv libsodium $(xTUN_STATIC)
 
 3rd/libuv/autogen.sh:
 	$(Q)git submodule update --init
@@ -118,12 +122,12 @@ $(OBJTREE)/3rd/libsodium/Makefile: | 3rd/libsodium/autogen.sh
 
 libsodium: $(OBJTREE)/3rd/libsodium/Makefile
 
-$(XTUN): \
+$(xTUN): \
 	$(OBJTREE)/src/util.o \
-	$(OBJTREE)/src/common.o \
 	$(OBJTREE)/src/logger.o \
 	$(OBJTREE)/src/daemon.o \
 	$(OBJTREE)/src/signal.o \
+	$(OBJTREE)/src/buffer.o \
 	$(OBJTREE)/src/crypto.o \
 	$(OBJTREE)/src/peer.o \
 	$(OBJTREE)/src/packet.o \
@@ -135,10 +139,10 @@ $(XTUN): \
 	$(OBJTREE)/src/main.o
 	$(LINK) $^ -o $@ $(LDFLAGS)
 
-$(XTUN_STATIC): \
+$(xTUN_STATIC): \
 	$(OBJTREE)/src/util.o \
-	$(OBJTREE)/src/common.o \
 	$(OBJTREE)/src/logger.o \
+	$(OBJTREE)/src/buffer.o \
 	$(OBJTREE)/src/crypto.o \
 	$(OBJTREE)/src/checksum.o \
 	$(OBJTREE)/src/android.o \
@@ -149,7 +153,7 @@ $(XTUN_STATIC): \
 	$(OBJTREE)/src/tcp_server.o \
 	$(OBJTREE)/src/udp.o \
 	$(OBJTREE)/src/tun.o
-	$(BUILD_AR) rcu $@ $^
+	$(BUILD_AR) rc $@ $^
 	$(BUILD_RANLIB) $@
 
 clean:
@@ -157,7 +161,7 @@ clean:
 	\( -name '*.o' -o -name '*~' \
 	-o -name '*.tmp' \) -print \
 	| xargs rm -f
-	@rm -f $(XTUN) $(XTUN_STATIC)
+	@rm -f $(xTUN) $(xTUN_STATIC)
 
 distclean: clean
 ifeq ($(OBJTREE)/3rd/libsodium/Makefile, $(wildcard $(OBJTREE)/3rd/libsodium/Makefile))

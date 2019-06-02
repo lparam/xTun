@@ -1,69 +1,70 @@
 #include <string.h>
-#include <assert.h>
 
 #include "util.h"
 #include "packet.h"
+#include "tun.h"
 
+int
+packet_parse(packet_t *packet, buffer_t *buf, cipher_ctx_t *ctx) {
+    buffer_t tmp;
+
+    if (packet->size == 0) {
+        size_t hdrsz = cipher_overhead(ctx) + PACKET_HEADER_BYTES;
+        if (buf->len < hdrsz) {
+            return PACKET_UNCOMPLETE;
+        }
+
+        tmp.data = buf->data;
+        tmp.len = hdrsz;
+        if (crypto_decrypt(&tmp, ctx)) {
+            return PACKET_INVALID;
+        }
+
+        packet->size = read_size(tmp.data);
+        if (packet->size > PACKET_BUFFER_SIZE || packet->size <= CRYPTO_MIN_OVERHEAD) {
+            return PACKET_INVALID;
+        }
+
+        buf->off += hdrsz;
+    }
+
+    if (buf->len - buf->off < packet->size) {
+        return PACKET_UNCOMPLETE;
+    }
+
+    tmp.data = buf->data + buf->off;
+    tmp.len = packet->size;
+    buf->off += packet->size;
+    if (crypto_decrypt(&tmp, ctx)) {
+        return PACKET_INVALID;
+    }
+    packet->buf = tmp.data;
+    packet->size = tmp.len;
+
+    return PACKET_COMPLETED;
+}
 
 void
-packet_alloc(struct packet *packet, uv_buf_t *buf) {
-    if (packet->size) {
-        buf->base = (char *) packet->buf + packet->offset;
-        buf->len = packet->size - packet->offset;
-    } else {
-        buf->base = (char *) packet->buf + (packet->read ? 1 : 0);
-        buf->len = packet->read ? 1 : HEADER_BYTES;
-    }
+packet_reset(packet_t *packet) {
+    packet->buf = NULL;
+    packet->size = 0;
 }
 
 int
-packet_filter(struct packet *packet, const char *buf, ssize_t buflen) {
-    int rc = PACKET_INVALID;
-
-    if (packet->size == 0) {
-        if (packet->read == 0) {
-            if (buflen == HEADER_BYTES) {
-                packet->size = read_size((uint8_t *) buf);
-                if (packet->size > PRIMITIVE_BYTES && packet->size <= packet->max) {
-                    rc = PACKET_UNCOMPLETE;
-                } else {
-                    rc = PACKET_INVALID;
-                }
-
-            } else {
-                assert(buflen == 1);
-                packet->read = 1;
-                rc = PACKET_UNCOMPLETE;
-            }
-
-        } else {
-            assert(packet->read == 1);
-            packet->size = read_size((uint8_t *) packet->buf);
-            if (packet->size > PRIMITIVE_BYTES && packet->size <= packet->max) {
-                rc = PACKET_UNCOMPLETE;
-            } else {
-                rc = PACKET_INVALID;
-            }
-        }
-
-    } else {
-        if (buflen + packet->offset == packet->size) {
-            rc = PACKET_COMPLETED;
-
-        } else {
-            assert(buflen + packet->offset < packet->size);
-            packet->offset += buflen;
-            rc = PACKET_UNCOMPLETE;
-        }
-    }
-
-    return rc;
+packet_is_keepalive(buffer_t *buf) {
+    return (buf->len == sizeof(struct iphdr) + strlen(xTUN_KEEPALIVE)) &&
+            !strncmp((char *)(buf->data + sizeof(struct iphdr)),
+                     xTUN_KEEPALIVE, strlen(xTUN_KEEPALIVE));
 }
 
 void
-packet_reset(struct packet *packet) {
-    packet->read = 0;
-    packet->offset = 0;
-    packet->size = 0;
-    memset(packet->buf, 0, packet->max);
+packet_construct_keepalive(buffer_t *buf, tundev_t *tun) {
+    size_t len = sizeof(struct iphdr) + strlen(xTUN_KEEPALIVE);
+    buffer_alloc(buf, len + CRYPTO_MAX_OVERHEAD);
+    memset(buf->data, 0, len);
+    buf->len = len;
+    struct iphdr *iphdr = (struct iphdr *)buf->data;
+    iphdr->saddr = tun->addr;
+    iphdr->daddr = tun->network;
+    memcpy(buf->data + sizeof *iphdr, xTUN_KEEPALIVE, strlen(xTUN_KEEPALIVE));
 }

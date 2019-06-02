@@ -1,3 +1,8 @@
+v0.6.0 (2019-6-01)
+-----------
+* Change: chacha20poly1305 instead of salsa208poly1305
+
+
 v0.5.2 (2017-8-30)
 -----------
 * Feature: NAT Keepalive

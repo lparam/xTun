@@ -8,6 +8,9 @@
 
 
 #define container_of(ptr, type, member) ((type*)(((char*)(ptr)) - offsetof(type, member)))
+#define max(a, b) (((a) > (b)) ? (a) : (b))
+
+#define ATOMIC_INC(ptr) __atomic_add_fetch(ptr, 1, __ATOMIC_SEQ_CST)
 
 
 void dump_hex(const void *data, uint32_t len, char *title);

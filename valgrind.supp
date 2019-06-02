@@ -7,7 +7,7 @@
    fun:uv__signal_event
    fun:uv__io_poll
    fun:uv_run
-   fun:tun_start
+   fun:tun_run
    fun:main
 }
 {
@@ -35,6 +35,6 @@
    fun:allocate_stack
    fun:pthread_create@@GLIBC_2.2.5
    fun:uv_thread_create
-   fun:tun_start
+   fun:tun_run
    fun:main
 }

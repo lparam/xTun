@@ -8,7 +8,7 @@ FIREWALL_RELOAD=0
 IFACE=tun0
 IP=10.0.0.2/24
 SERVER=IP
-PORT=PORt
+PORT=PORT
 PASSWORD=PASSWORD
 
 IP_ROUTE_TABLE=xTun
@@ -56,7 +56,7 @@ net_start() {
         iptables -F $CHAIN
         iptables -Z $CHAIN
     )
-    iptables -I $CHAIN 1 -i $IFACE -m state --state RELATED,ESTABLISHED -j ACCEPT
+    iptables -I $CHAIN 1 -i $IFACE -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
     iptables -I $CHAIN 1 -o $IFACE -j ACCEPT
     iptables -I FORWARD -j $CHAIN
 

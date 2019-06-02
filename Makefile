@@ -1,6 +1,6 @@
 MAJOR = 0
-MINOR = 5
-PATCH = 2
+MINOR = 6
+PATCH = 0
 NAME = xTun
 
 ifdef O
@@ -78,6 +78,10 @@ ifdef ANDROID
 LDFLAGS += -pie -fPIE
 else
 LIBS += -lrt
+endif
+
+ifdef OPENWRT
+LIBS += -latomic
 endif
 
 LIBS += $(OBJTREE)/3rd/libuv/.libs/libuv.a

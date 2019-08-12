@@ -18,7 +18,7 @@
 #define CONNECTING     1
 #define CONNECTED      2
 
-#define MAX_RETRY_INTERVAL 300
+#define MAX_RETRY_INTERVAL 60
 
 typedef struct tcp_client {
     int status;
@@ -113,7 +113,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         if (nread < 0) {
             if (nread != UV_EOF) {
                 logger_log(LOG_ERR, "Receive from server failed (%d: %s)",
-                        nread, uv_strerror(nread));
+                           nread, uv_strerror(nread));
             } else {
                 logger_log(LOG_INFO, "Server close");
             }

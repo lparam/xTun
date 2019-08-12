@@ -57,9 +57,12 @@ static int
 route(buffer_t *tunbuf, tundev_ctx_t *ctx) {
     struct iphdr *iphdr = (struct iphdr *) tunbuf->data;
     if (iphdr->version != 4) {
-        logger_log(LOG_NOTICE, "Discard non-IPv4 packet");
+        logger_log(LOG_WARNING, "Discard non-IPv4 packet");
         return 1;
     }
+
+    char saddr[24] = {0}, daddr[24] = {0};
+    parse_addr(iphdr, saddr, daddr);
 
     if (mode == xTUN_SERVER) {
         uv_rwlock_rdlock(&peers_rwlock);
@@ -75,11 +78,9 @@ route(buffer_t *tunbuf, tundev_ctx_t *ctx) {
             }
 
         } else {
-            char saddr[24] = {0}, daddr[24] = {0};
-            parse_addr(iphdr, saddr, daddr);
             in_addr_t network = iphdr->daddr & htonl(ctx->tun->netmask);
             if (network != ctx->tun->network) {
-                logger_log(LOG_NOTICE, "Discard %s -> %s", saddr, daddr);
+                logger_log(LOG_WARNING, "Discard %s -> %s", saddr, daddr);
             } else {
                 logger_log(LOG_WARNING, "Peer is not connected: %s -> %s", saddr, daddr);
             }
@@ -87,7 +88,16 @@ route(buffer_t *tunbuf, tundev_ctx_t *ctx) {
         }
 
     } else {
+        in_addr_t network = iphdr->saddr & htonl(ctx->tun->netmask);
+        if (network != ctx->tun->network) {
+            logger_log(LOG_WARNING, "Discard %s -> %s", saddr, daddr);
+            return 1;
+        }
+
 #ifdef ANDROID
+        if (verbose) {
+            logger_log(LOG_DEBUG, "%s -> %s", saddr, daddr);
+        }
         // TODO: Check full DNS packet
         if (!dns_global) {
             uint16_t frag = iphdr->frag_off & htons(0x1fff);
@@ -369,6 +379,7 @@ tun_config(tundev_t *tun, const char *ifconf, int fd, int mtu, int prot,
 
     tun->mtu = mtu;
     dns_global = global;
+    logger_log(LOG_INFO, "Global DNS: %s", global ? "true" : "false");
 
     ctx->tunfd = fd;
 

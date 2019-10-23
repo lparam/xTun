@@ -1,6 +1,7 @@
-#include <string.h>
-#include <assert.h>
 #include <inttypes.h>
+#include <assert.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "uv.h"
 #include "uv/tree.h"
@@ -211,7 +212,7 @@ client_info(client_t *client) {
     int port = 0;
     char remote[INET_ADDRSTRLEN + 1];
     port = ip_name(&client->addr, remote, sizeof(remote));
-    logger_log(LOG_INFO, "cid:%"PRIu64" - %s:%d incoming",
+    logger_log(LOG_INFO, "cid:%"PRIu64" - Connection attempt from [%s:%d]",
                client->cid, remote, port);
 }
 
@@ -230,8 +231,10 @@ accept_cb(uv_stream_t *stream, int status) {
         uv_tcp_getpeername(&client->handle.tcp, &client->addr, &len);
         client_info(client);
         client->handle.stream.data = ctx;
-        uv_tcp_nodelay(&client->handle.tcp, 1);
-        uv_tcp_keepalive(&client->handle.tcp, 1, 60);
+        int fd = client->handle.tcp.io_watcher.fd;
+        if (tcp_opts(fd) != 0) {
+            logger_stderr("set tcp opts - %s", strerror(errno));
+        }
         uv_read_start(&client->handle.stream, alloc_cb, recv_cb);
 
     } else {

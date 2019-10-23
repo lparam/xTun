@@ -17,6 +17,7 @@
 
 #include "uv.h"
 #include "logger.h"
+#include "util.h"
 
 
 #define MAX_LINE_LENGTH_BYTES (64)
@@ -197,18 +198,54 @@ create_socket(int type, int reuse) {
         return -1;
     }
     if (reuse) {
-        int yes = 1;
+        int on = 1;
 #ifdef SO_REUSEPORT
-        if (setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &yes, sizeof(yes))) {
+        if (setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on))) {
             logger_stderr("setsockopt SO_REUSEPORT error: %s", strerror(errno));
         }
 #else
-        if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes))) {
+        if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on))) {
             logger_stderr("setsockopt SO_REUSEADDR error: %s", strerror(errno));
         }
 #endif
     }
     return sock;
+}
+
+int tcp_opts(int fd) {
+    int on = 1;
+
+    (void) setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (char *) &on, sizeof on);
+#ifdef TCP_QUICKACK
+    (void) setsockopt(fd, IPPROTO_TCP, TCP_QUICKACK, (char *) &on, sizeof on);
+#else
+    (void) setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *) &on, sizeof on);
+#endif
+#ifdef TCP_CONGESTION
+    (void) setsockopt(fd, IPPROTO_TCP, TCP_CONGESTION, OUTER_CONGESTION_CONTROL_ALG,
+                      sizeof OUTER_CONGESTION_CONTROL_ALG - 1);
+#endif
+#if BUFFERBLOAT_CONTROL && defined(TCP_NOTSENT_LOWAT)
+    (void) setsockopt(fd, IPPROTO_TCP, TCP_NOTSENT_LOWAT,
+                      (char *) (uint32_t[]){ NOTSENT_LOWAT }, sizeof(uint32_t));
+#endif
+#ifdef TCP_USER_TIMEOUT
+    (void) setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, (char *) (uint32_t[]){ TCP_TIMEOUT },
+                      sizeof(uint32_t));
+#endif
+#ifdef SO_MARK
+    (void) setsockopt(fd, SOL_SOCKET, SO_MARK, (char *) (uint32_t[]){ SOCKET_MARK },
+                      sizeof(uint32_t));
+#endif
+    return 0;
+}
+
+int socket_mark(int fd) {
+#ifdef SO_MARK
+    (void) setsockopt(fd, SOL_SOCKET, SO_MARK, (char *) (uint32_t[]){ SOCKET_MARK },
+                      sizeof(uint32_t));
+#endif
+    return 0;
 }
 
 #ifndef ANDROID

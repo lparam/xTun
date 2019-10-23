@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "uv.h"
 
@@ -196,7 +197,12 @@ tcp_client_connect(tcp_client_t *c) {
 
     c->inet_tcp_fd = create_socket(SOCK_STREAM, 0);
     if (c->inet_tcp_fd < 0) {
-        logger_stderr("Create socket - %s", strerror(errno));
+        logger_log(LOG_ERR, "Create socket - %s", strerror(errno));
+        return;
+    }
+    if (tcp_opts(c->inet_tcp_fd) != 0) {
+        logger_log(LOG_ERR, "Set tcp opts - %s", strerror(errno));
+        (void) close(c->inet_tcp_fd);
         return;
     }
     if ((rc = uv_tcp_open(&c->inet_tcp.tcp, c->inet_tcp_fd))) {
@@ -208,11 +214,10 @@ tcp_client_connect(tcp_client_t *c) {
     rc = protect_socket(c->inet_tcp_fd);
     logger_log(rc ? LOG_INFO : LOG_ERR, "Protect socket %s",
                rc ? "successful" : "failed");
-    logger_log(LOG_INFO, "Connect to server...");
 #endif
 
-    rc = uv_tcp_nodelay(&c->inet_tcp.tcp, 1);
-    rc = uv_tcp_keepalive(&c->inet_tcp.tcp, 1, 60);
+    logger_log(LOG_INFO, "Connect to server...");
+
     rc = uv_tcp_connect(&c->connect_req, &c->inet_tcp.tcp, c->server_addr, connect_cb);
     if (rc) {
         /* TODO: reconnect */

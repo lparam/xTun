@@ -3,8 +3,8 @@
 
 #include <stdint.h>
 
-#define xTun_VERSION      "0.6.0"
-#define xTun_VER          "xTun/" xTun_VERSION
+#define xTun_VERSION    "0.6.0"
+#define xTun_VER        "xTun/" xTun_VERSION
 
 struct tundev;
 
@@ -20,6 +20,6 @@ int tun_run(struct tundev *tun, struct sockaddr addr);
 #endif
 void tun_free(struct tundev *tun);
 void tun_stop(struct tundev *tun);
-int tun_keepalive(struct tundev *tun, int on, unsigned int interval);
+int tun_keepalive(struct tundev *tun, int on, uint32_t interval);
 
 #endif // for #ifndef _XTUN_H

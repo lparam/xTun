@@ -180,7 +180,7 @@ close_network(tundev_ctx_t *ctx) {
 
 #ifndef ANDROID
 tundev_t *
-tun_alloc(char *iface, uint32_t parallel) {
+tun_alloc(const char *iface, uint32_t parallel) {
     int i, err, fd, nqueues;
     tundev_t *tun;
 
@@ -190,12 +190,11 @@ tun_alloc(char *iface, uint32_t parallel) {
     tun = malloc(sizeof(*tun) + ctxsz);
     memset(tun, 0, sizeof(*tun) + ctxsz);
     tun->queues = nqueues;
-    strcpy(tun->iface, iface);
 
     struct ifreq ifr;
     memset(&ifr, 0, sizeof ifr);
     ifr.ifr_flags = IFF_TUN | IFF_NO_PI | IFF_MULTI_QUEUE;
-    strncpy(ifr.ifr_name, tun->iface, IFNAMSIZ);
+    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", iface == NULL ? "" : iface);
 
     for (i = 0; i < nqueues; i++) {
         if ((fd = open("/dev/net/tun", O_RDWR | O_NONBLOCK)) < 0 ) {
@@ -204,14 +203,17 @@ tun_alloc(char *iface, uint32_t parallel) {
         }
         err = ioctl(fd, TUNSETIFF, (void *)&ifr);
         if (err) {
-            logger_stderr("Cannot allocate TUN: %s", strerror(errno));
-            close(fd);
+            err = errno;
+            (void) close(fd);
+            errno = err;
             goto err;
         }
         tundev_ctx_t *ctx = &tun->contexts[i];
         ctx->tun = tun;
         ctx->tunfd = fd;
     }
+
+    snprintf(tun->iface, IFNAMSIZ, "%s", ifr.ifr_name);
 
     return tun;
 err:
@@ -292,7 +294,7 @@ tun_config(tundev_t *tun, const char *ifconf, int mtu) {
 
     struct ifreq ifr;
     memset(&ifr, 0, sizeof ifr);
-    strncpy(ifr.ifr_name, tun->iface, IFNAMSIZ);
+    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", tun->iface);
 
     struct sockaddr_in *saddr = (struct sockaddr_in *) &ifr.ifr_addr;
     saddr->sin_family = AF_INET;
@@ -390,7 +392,7 @@ tun_config(tundev_t *tun, const char *ifconf, int fd, int mtu, int prot,
 }
 #endif
 
-int tun_keepalive(tundev_t *tun, int on, unsigned int interval) {
+int tun_keepalive(tundev_t *tun, int on, uint32_t interval) {
     if (on && interval) {
         tun->keepalive_interval = interval;
     } else {

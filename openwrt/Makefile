@@ -27,7 +27,7 @@ endef
 
 define Package/xTun
   $(call Package/xTun/Default)
-  DEPENDS:=+libatomic +libpthread +librt
+  DEPENDS:=+ipset +libpthread +librt
 endef
 
 define Package/xTun/description

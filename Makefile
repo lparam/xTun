@@ -1,6 +1,6 @@
 MAJOR = 0
 MINOR = 6
-PATCH = 0
+PATCH = 1
 NAME = xTun
 
 ifdef O
@@ -75,7 +75,9 @@ endif
 LDFLAGS = -Wl,--gc-sections
 
 ifdef ANDROID
-LDFLAGS += -pie -fPIE
+LDFLAGS += -fPIC
+LIBUV_FLAGS = --enable-shared=false
+LIBSODIUM_FLAGS = --disable-shared --disable-asm --disable-pie
 else
 LIBS += -lrt
 endif
@@ -108,7 +110,7 @@ $(OBJTREE)/3rd/libuv/Makefile: | 3rd/libuv/autogen.sh
 	$(Q)mkdir -p $(OBJTREE)/3rd/libuv
 	$(Q)cd 3rd/libuv && ./autogen.sh
 	$(Q)cd 3rd/libuv &&autoreconf --force -ivf
-	$(Q)cd $(OBJTREE)/3rd/libuv && $(SRCTREE)/3rd/libuv/configure --host=$(HOST) LDFLAGS= && $(MAKE)
+	$(Q)cd $(OBJTREE)/3rd/libuv && $(SRCTREE)/3rd/libuv/configure --host=$(HOST) $(LIBUV_FLAGS) LDFLAGS= && $(MAKE)
 
 libuv: $(OBJTREE)/3rd/libuv/Makefile
 
@@ -118,7 +120,7 @@ libuv: $(OBJTREE)/3rd/libuv/Makefile
 $(OBJTREE)/3rd/libsodium/Makefile: | 3rd/libsodium/autogen.sh
 	$(Q)mkdir -p $(OBJTREE)/3rd/libsodium
 	$(Q)cd 3rd/libsodium && ./autogen.sh
-	$(Q)cd $(OBJTREE)/3rd/libsodium && $(SRCTREE)/3rd/libsodium/configure --host=$(HOST) LDFLAGS= && $(MAKE)
+	$(Q)cd $(OBJTREE)/3rd/libsodium && $(SRCTREE)/3rd/libsodium/configure --host=$(HOST) $(LIBSODIUM_FLAGS) LDFLAGS= && $(MAKE)
 
 libsodium: $(OBJTREE)/3rd/libsodium/Makefile
 
@@ -155,6 +157,9 @@ $(xTUN_STATIC): \
 	$(OBJTREE)/src/tun.o
 	$(BUILD_AR) rc $@ $^
 	$(BUILD_RANLIB) $@
+
+package:
+	tar -czf xTun.tar.gz xTun
 
 clean:
 	@find $(OBJTREE)/src -type f \

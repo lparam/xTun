@@ -11,17 +11,9 @@ if [ "x$TARGET_ARCH" = 'x' ] || [ "x$ARCH" = 'x' ] || [ "x$HOST_COMPILER" = 'x' 
     exit 1
 fi
 
-export MAKE_TOOLCHAIN="${ANDROID_NDK_HOME}/build/tools/make-standalone-toolchain.sh"
-export TOOLCHAIN_DIR="$(pwd)/android-toolchain-${TARGET_ARCH}"
+export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64
 export PREFIX="$(pwd)/xTun-android-${TARGET_ARCH}"
-export PATH="${PATH}:${TOOLCHAIN_DIR}/bin"
+export PATH="${PATH}:${TOOLCHAIN}/bin"
 
-if [ ! -d $TOOLCHAIN_DIR ]; then
-    bash $MAKE_TOOLCHAIN \
-        --arch=$ARCH \
-        --install-dir=$TOOLCHAIN_DIR \
-        --platform=android-9
-fi
-
-make CROSS="${HOST_COMPILER}-" O="${PREFIX}" android V=1
+make CROSS="${HOST_COMPILER}-" CC="${CC}" O="${PREFIX}" android V=1
 echo "xTun has been installed into $PREFIX"

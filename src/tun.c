@@ -57,9 +57,12 @@ static int
 route(buffer_t *tunbuf, tundev_ctx_t *ctx) {
     struct iphdr *iphdr = (struct iphdr *) tunbuf->data;
     if (iphdr->version != 4) {
-        logger_log(LOG_NOTICE, "Discard non-IPv4 packet");
+        logger_log(LOG_WARNING, "Discard non-IPv4 packet");
         return 1;
     }
+
+    char saddr[24] = {0}, daddr[24] = {0};
+    parse_addr(iphdr, saddr, daddr);
 
     if (mode == xTUN_SERVER) {
         uv_rwlock_rdlock(&peers_rwlock);
@@ -75,11 +78,9 @@ route(buffer_t *tunbuf, tundev_ctx_t *ctx) {
             }
 
         } else {
-            char saddr[24] = {0}, daddr[24] = {0};
-            parse_addr(iphdr, saddr, daddr);
             in_addr_t network = iphdr->daddr & htonl(ctx->tun->netmask);
             if (network != ctx->tun->network) {
-                logger_log(LOG_NOTICE, "Discard %s -> %s", saddr, daddr);
+                logger_log(LOG_WARNING, "Discard %s -> %s", saddr, daddr);
             } else {
                 logger_log(LOG_WARNING, "Peer is not connected: %s -> %s", saddr, daddr);
             }
@@ -87,7 +88,16 @@ route(buffer_t *tunbuf, tundev_ctx_t *ctx) {
         }
 
     } else {
-#ifdef ANDROID
+        in_addr_t network = iphdr->saddr & htonl(ctx->tun->netmask);
+        if (network != ctx->tun->network) {
+            logger_log(LOG_WARNING, "Discard %s -> %s", saddr, daddr);
+            return 1;
+        }
+
+#ifdef ANDROID_RESERVED
+        if (verbose) {
+            logger_log(LOG_DEBUG, "%s -> %s", saddr, daddr);
+        }
         // TODO: Check full DNS packet
         if (!dns_global) {
             uint16_t frag = iphdr->frag_off & htons(0x1fff);
@@ -170,7 +180,7 @@ close_network(tundev_ctx_t *ctx) {
 
 #ifndef ANDROID
 tundev_t *
-tun_alloc(char *iface, uint32_t parallel) {
+tun_alloc(const char *iface, uint32_t parallel) {
     int i, err, fd, nqueues;
     tundev_t *tun;
 
@@ -180,12 +190,11 @@ tun_alloc(char *iface, uint32_t parallel) {
     tun = malloc(sizeof(*tun) + ctxsz);
     memset(tun, 0, sizeof(*tun) + ctxsz);
     tun->queues = nqueues;
-    strcpy(tun->iface, iface);
 
     struct ifreq ifr;
     memset(&ifr, 0, sizeof ifr);
     ifr.ifr_flags = IFF_TUN | IFF_NO_PI | IFF_MULTI_QUEUE;
-    strncpy(ifr.ifr_name, tun->iface, IFNAMSIZ);
+    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", iface == NULL ? "" : iface);
 
     for (i = 0; i < nqueues; i++) {
         if ((fd = open("/dev/net/tun", O_RDWR | O_NONBLOCK)) < 0 ) {
@@ -194,14 +203,17 @@ tun_alloc(char *iface, uint32_t parallel) {
         }
         err = ioctl(fd, TUNSETIFF, (void *)&ifr);
         if (err) {
-            logger_stderr("Cannot allocate TUN: %s", strerror(errno));
-            close(fd);
+            err = errno;
+            (void) close(fd);
+            errno = err;
             goto err;
         }
         tundev_ctx_t *ctx = &tun->contexts[i];
         ctx->tun = tun;
         ctx->tunfd = fd;
     }
+
+    snprintf(tun->iface, IFNAMSIZ, "%s", ifr.ifr_name);
 
     return tun;
 err:
@@ -282,7 +294,7 @@ tun_config(tundev_t *tun, const char *ifconf, int mtu) {
 
     struct ifreq ifr;
     memset(&ifr, 0, sizeof ifr);
-    strncpy(ifr.ifr_name, tun->iface, IFNAMSIZ);
+    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", tun->iface);
 
     struct sockaddr_in *saddr = (struct sockaddr_in *) &ifr.ifr_addr;
     saddr->sin_family = AF_INET;
@@ -369,6 +381,7 @@ tun_config(tundev_t *tun, const char *ifconf, int fd, int mtu, int prot,
 
     tun->mtu = mtu;
     dns_global = global;
+    logger_log(LOG_INFO, "Global DNS: %s", global ? "true" : "false");
 
     ctx->tunfd = fd;
 
@@ -379,7 +392,7 @@ tun_config(tundev_t *tun, const char *ifconf, int fd, int mtu, int prot,
 }
 #endif
 
-int tun_keepalive(tundev_t *tun, int on, unsigned int interval) {
+int tun_keepalive(tundev_t *tun, int on, uint32_t interval) {
     if (on && interval) {
         tun->keepalive_interval = interval;
     } else {

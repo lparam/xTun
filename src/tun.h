@@ -1,11 +1,13 @@
 #ifndef TUN_H
 #define TUN_H
 
-#include "uv.h"
+#include <linux/if.h>
+
 #include "packet.h"
 #include "peer.h"
 #include "udp.h"
 #include "tcp.h"
+#include "uv.h"
 
 
 /* MTU of VPN tunnel device. Use the following formula to calculate:
@@ -42,7 +44,7 @@ typedef struct tundev_ctx {
 } tundev_ctx_t;
 
 typedef struct tundev {
-    char                   iface[128];
+    char                   iface[IFNAMSIZ];
     char                   ifconf[128];
     int                    mtu;
     int                    keepalive_interval;

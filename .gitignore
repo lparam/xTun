@@ -31,8 +31,19 @@
 # Debug files
 *.dSYM/
 
+# openwrt
+.built*
+.configured_*
+.pkgdir
+.prepared
+.quilt_checked
+.source_dir
+ipkg-*
+
 *.swp
 .ycm_extra_conf.pyc
 .vscode
 /core
 /xTun
+/xTun-android-armv7-a
+/xTun-android-i686

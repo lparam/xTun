@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=xTun
-PKG_VERSION:=0.6.0
+PKG_VERSION:=0.6.1
 PKG_RELEASE=
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
@@ -27,7 +27,7 @@ endef
 
 define Package/xTun
   $(call Package/xTun/Default)
-  DEPENDS:=+libatomic +libpthread +librt
+  DEPENDS:=+ipset +libpthread +librt
 endef
 
 define Package/xTun/description

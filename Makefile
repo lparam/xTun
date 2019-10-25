@@ -1,6 +1,6 @@
 MAJOR = 0
 MINOR = 6
-PATCH = 1
+PATCH = 2
 NAME = xTun
 
 ifdef O

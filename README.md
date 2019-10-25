@@ -69,7 +69,7 @@ client.sh | server.sh <command> -h|--help
 
 ### OpenWrt
 
-Modify your SERVER and PASSWORD in /etc/init.d/xTun
+Modify your `SERVER` and `PASSWORD` in /etc/init.d/xTun
 
 ```bash
 /etc/init.d/xTun {start, stop}

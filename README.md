@@ -1,9 +1,9 @@
-xTun
-=================
+# xTun
+
 A secure and fast VPN for protect your network traffic
 
-Features
-------------
+## Features
+
 * Stateless
 * CCA security
 * Low cost (CPU, RAM and packet overhead)
@@ -11,9 +11,7 @@ Features
 * TCP and UDP support
 * Parallelization
 
-
-BUILD
-------------
+## BUILD
 
 ### Linux
 
@@ -29,45 +27,52 @@ git clone https://github.com/lparam/xTun.git package/xTun
 make package/xTun/openwrt/compile
 ```
 
-Usage
-------------
-
-### Server
+## Usage
 
 ```bash
-xTun -I IP/MASK -k PASSWORD -s -P PARALLEL
-scripts/server_up.sh
+$ xTun -h
+xTun Version: xTun/0.6.1 Maintained by lparam
+Usage:
+  xTun [options]
+Options:
+  -I <ifconf>            CIDR of interface (e.g. 10.3.0.1/16)
+  -k <password>          shared password for data encryption
+  -c --client <host>     run in client mode, connecting to <host>
+  -s --server            run in server mode
+  [-p --port <port>]     server port to listen on/connect to (default: 1082)
+  [-i <iface>]           interface name (e.g. tun0)
+  [-b --bind <host>]     bind to a specific interface (only available on server mode, default: 0.0.0.0)
+  [-P <parallel>]        number of parallel tun queues (only available on server mode & UDP)
+  [--pid <pid>]          PID file of daemon (default: /var/run/xTun.pid)
+  [--mtu <mtu>]          MTU size (default: 1426)
+  [--keepalive <second>] keepalive delay (default: 0)
+  [--signal <signal>]    send signal to xTun: quit, stop
+  [-t --tcp]             use TCP rather than UDP (only available on client mode)
+  [-n]                   non daemon mode
+  [-h, --help]           this help
+  [-v, --version]        show version
+  [-V]                   verbose mode
 ```
 
-Stop:
-```bash
-xTun --signal stop
-scripts/server_down.sh
-```
-
-### Client
+### scripts
 
 ```bash
-xTun -I IP/MASK -k PASSWORD -c SERVER
-scripts/client_up.sh
-```
+$ scripts/{client.sh, server.sh} -h
+Usage: client.sh | server.sh <command> [options]
+Commands:
+    start   start tun
+    stop    stop tun
 
-Stop:
-```bash
-xTun --signal stop
-scripts/client_down.sh
+For help with each command run:
+client.sh | server.sh <command> -h|--help
 ```
 
 ### OpenWrt
 
-Modify your SERVER and PASSWORD in /etc/init.d/xTun
-```bash
-/etc/init.d/xTun start
-```
+Modify your `SERVER` and `PASSWORD` in /etc/init.d/xTun
 
-Stop:
 ```bash
-/etc/init.d/xTun stop
+/etc/init.d/xTun {start, stop}
 ```
 
 ## License

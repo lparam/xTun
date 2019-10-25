@@ -1,3 +1,8 @@
+v0.6.2 (2019-10-25)
+-----------
+* Change: README
+
+
 v0.6.1 (2019-10-25)
 -----------
 * Feature: set tcp socket option

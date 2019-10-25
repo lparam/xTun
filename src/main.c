@@ -21,7 +21,7 @@ static int port = 1082;
 static int keepalive_interval = 0;
 static int daemon_mode = 1;
 static uint32_t parallel = 1;
-static char *iface = "tun0";
+static char *iface = "";
 static char *ifconf;
 static char *addrbuf;
 static char *pidfile = "/var/run/xTun.pid";
@@ -71,7 +71,7 @@ print_usage(const char *prog) {
          "  -c --client <host>\t run in client mode, connecting to <host>\n"
          "  -s --server\t\t run in server mode\n"
          "  [-p --port <port>]\t server port to listen on/connect to (default: 1082)\n"
-         "  [-i <iface>]\t\t interface name (default: tun0)\n"
+         "  [-i <iface>]\t\t interface name (e.g. tun0)\n"
          "  [-b --bind <host>]\t bind to a specific interface (only available on server mode, default: 0.0.0.0)\n"
          "  [-P <parallel>]\t number of parallel tun queues (only available on server mode & UDP)\n"
          "  [--pid <pid>]\t\t PID file of daemon (default: /var/run/xTun.pid)\n"
@@ -193,7 +193,7 @@ main(int argc, char *argv[]) {
         return signal_process(xsignal, pidfile);
     }
 
-    if (!mode || !iface || !ifconf || !password) {
+    if (!mode || !ifconf || !password) {
         print_usage(argv[0]);
         return 1;
     }

@@ -94,7 +94,7 @@ route(buffer_t *tunbuf, tundev_ctx_t *ctx) {
             return 1;
         }
 
-#ifdef ANDROID
+#ifdef ANDROID_RESERVED
         if (verbose) {
             logger_log(LOG_DEBUG, "%s -> %s", saddr, daddr);
         }

@@ -1,3 +1,9 @@
+v0.6.1 (2019-10-25)
+-----------
+* Feature: set tcp socket option
+* Feature: auto set interface name
+
+
 v0.6.0 (2019-6-01)
 -----------
 * Change: chacha20poly1305 instead of salsa208poly1305

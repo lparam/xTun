@@ -32,14 +32,20 @@ ifdef HOST
 CROSS_COMPILE = $(HOST)-
 endif
 
-# for OpenWrt
+# openwrt
 ifdef CROSS
 CROSS_COMPILE = $(CROSS)
 HOST = $(patsubst %-,%,$(CROSS_COMPILE))
 endif
 
+# padavan
+ifdef HOST_TARGET
+HOST=$(HOST_TARGET)
+ROUTER = 1
+endif
+
 ifneq (,$(findstring openwrt,$(CROSS_COMPILE)))
-OPENWRT = 1
+ROUTER = 1
 endif
 
 ifdef CROSS_COMPILE
@@ -82,8 +88,8 @@ else
 LIBS += -lrt
 endif
 
-ifdef OPENWRT
-LIBS += -latomic
+ifdef ROUTER
+LIBS += -l:libatomic.a
 endif
 
 LIBS += $(OBJTREE)/3rd/libuv/.libs/libuv.a

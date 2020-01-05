@@ -62,7 +62,7 @@ Usage: client.sh | server.sh <command> [options]
 Commands:
     start   start tun
     stop    stop tun
-    restart stop tun
+    restart restart tun
 
 For help with each command run:
 client.sh | server.sh <command> -h|--help

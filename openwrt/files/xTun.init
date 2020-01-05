@@ -11,12 +11,14 @@ SERVER=IP
 PORT=PORT
 PASSWORD=PASSWORD
 
+DNS=1.1.1.1
+BLACK_LIST=/etc/black_list
+
 IP_ROUTE_TABLE=xTun
+IP_ROUTE_TABLE_ID=200
 FWMARK="0x023/0x023"
 SETNAME=wall
 CHAIN=xTun
-DNS=8.8.8.8
-BLACK_LIST=/etc/black_list
 
 start() {
     xTun -i $IFACE -I $IP -k $PASSWORD -c $SERVER -p $PORT
@@ -37,13 +39,13 @@ shutdown() {
 }
 
 net_start() {
-    sysctl -w net.ipv4.ip_forward=1 >> /dev/null
+    sysctl -w net.ipv4.ip_forward=1 >/dev/null
 
     for f in /proc/sys/net/ipv4/conf/*/rp_filter; do
         echo 0 > $f
     done
 
-    iptables -t nat -N $CHAIN > /dev/null 2>&1 || (
+    iptables -t nat -N $CHAIN >/dev/null 2>&1 || (
         iptables -t nat -D POSTROUTING -j $CHAIN
         iptables -t nat -F $CHAIN
         iptables -t nat -Z $CHAIN
@@ -51,7 +53,7 @@ net_start() {
     iptables -t nat -A $CHAIN -o $IFACE -j MASQUERADE
     iptables -t nat -A POSTROUTING -j $CHAIN
 
-    iptables -N $CHAIN > /dev/null 2>&1 || (
+    iptables -N $CHAIN >/dev/null 2>&1 || (
         iptables -D FORWARD -j $CHAIN
         iptables -F $CHAIN
         iptables -Z $CHAIN
@@ -60,7 +62,7 @@ net_start() {
     iptables -I $CHAIN 1 -o $IFACE -j ACCEPT
     iptables -I FORWARD -j $CHAIN
 
-    iptables -t mangle -N $CHAIN > /dev/null 2>&1 || (
+    iptables -t mangle -N $CHAIN >/dev/null 2>&1 || (
         iptables -t mangle -D PREROUTING -j $CHAIN
         iptables -t mangle -D OUTPUT -j $CHAIN
         iptables -t mangle -F $CHAIN
@@ -77,9 +79,9 @@ net_start() {
         ip rule del prio $rule_id
     done
 
-    CHKIPROUTE=$(grep $IP_ROUTE_TABLE /etc/iproute2/rt_tables)
-    if [ -z "$CHKIPROUTE" ]; then
-        echo "200 $IP_ROUTE_TABLE" >> /etc/iproute2/rt_tables
+    grep -q $IP_ROUTE_TABLE /etc/iproute2/rt_tables
+    if [ "$?" -ne 0 ]; then
+        echo "$IP_ROUTE_TABLE_ID $IP_ROUTE_TABLE" >> /etc/iproute2/rt_tables
     fi
 
     ip route add default dev $IFACE table $IP_ROUTE_TABLE
@@ -90,21 +92,21 @@ net_start() {
 }
 
 net_stop() {
-    iptables -t nat -D POSTROUTING -j $CHAIN > /dev/null 2>&1
-    iptables -t nat -F $CHAIN > /dev/null 2>&1
-    iptables -t nat -X $CHAIN > /dev/null 2>&1
+    iptables -t nat -D POSTROUTING -j $CHAIN 2>/dev/null
+    iptables -t nat -F $CHAIN 2>/dev/null
+    iptables -t nat -X $CHAIN 2>/dev/null
 
-    iptables -D FORWARD -j $CHAIN > /dev/null 2>&1
-    iptables -F $CHAIN > /dev/null 2>&1
-    iptables -X $CHAIN > /dev/null 2>&1
+    iptables -D FORWARD -j $CHAIN 2>/dev/null
+    iptables -F $CHAIN 2>/dev/null
+    iptables -X $CHAIN 2>/dev/null
 
-    iptables -t mangle -D PREROUTING -j $CHAIN > /dev/null 2>&1
-    iptables -t mangle -D OUTPUT -j $CHAIN > /dev/null 2>&1
-    iptables -t mangle -F $CHAIN > /dev/null 2>&1
-    iptables -t mangle -X $CHAIN > /dev/null 2>&1
+    iptables -t mangle -D PREROUTING -j $CHAIN 2>/dev/null
+    iptables -t mangle -D OUTPUT -j $CHAIN 2>/dev/null
+    iptables -t mangle -F $CHAIN 2>/dev/null
+    iptables -t mangle -X $CHAIN 2>/dev/null
 
-    ip route del default dev $IFACE table $IP_ROUTE_TABLE > /dev/null 2>&1
-    ip route del $DNS dev $IFACE > /dev/null 2>&1
+    ip route del default dev $IFACE table $IP_ROUTE_TABLE 2>/dev/null
+    ip route del $DNS dev $IFACE 2>/dev/null
     xTun_rule_ids=`ip rule list | grep "lookup $IP_ROUTE_TABLE" | sed 's/://g' | awk '{print $1}'`
     for rule_id in $xTun_rule_ids
     do

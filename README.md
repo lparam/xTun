@@ -7,7 +7,7 @@ A secure and fast VPN for protect your network traffic
 * Stateless
 * CCA security
 * Low cost (CPU, RAM and packet overhead)
-* Cross-platform, including PC (Linux), Mobile ([Android](https://github.com/lparam/xTun-android)) and Router (OpenWRT)
+* Cross-platform, including PC (Linux), Mobile ([Android](https://github.com/lparam/xTun-android)) and Router (OpenWrt, Padavan)
 * TCP and UDP support
 * Parallelization
 
@@ -19,10 +19,10 @@ A secure and fast VPN for protect your network traffic
 make && make install
 ```
 
-### OpenWRT
+### OpenWrt
 
 ```bash
-# At OpenWRT build root
+# At OpenWrt build root
 git clone https://github.com/lparam/xTun.git package/xTun
 make package/xTun/openwrt/compile
 ```
@@ -62,6 +62,7 @@ Usage: client.sh | server.sh <command> [options]
 Commands:
     start   start tun
     stop    stop tun
+    restart stop tun
 
 For help with each command run:
 client.sh | server.sh <command> -h|--help

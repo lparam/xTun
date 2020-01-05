@@ -184,7 +184,10 @@ tun_alloc(const char *iface, uint32_t parallel) {
     int i, err, fd, nqueues;
     tundev_t *tun;
 
+    nqueues = 1;
+#ifdef IFF_MULTI_QUEUE
     nqueues = mode == xTUN_SERVER ? parallel : 1;
+#endif
 
     size_t ctxsz = sizeof(tundev_ctx_t) * nqueues;
     tun = malloc(sizeof(*tun) + ctxsz);
@@ -193,7 +196,10 @@ tun_alloc(const char *iface, uint32_t parallel) {
 
     struct ifreq ifr;
     memset(&ifr, 0, sizeof ifr);
+    ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
+#ifdef IFF_MULTI_QUEUE
     ifr.ifr_flags = IFF_TUN | IFF_NO_PI | IFF_MULTI_QUEUE;
+#endif
     snprintf(ifr.ifr_name, IFNAMSIZ, "%s", iface == NULL ? "" : iface);
 
     for (i = 0; i < nqueues; i++) {

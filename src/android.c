@@ -228,7 +228,7 @@ handle_local_dns_query(int tunfd, struct sockaddr *dns_server, buffer_t *buf)
     size_t hdrlen = sizeof(struct iphdr) + sizeof(struct udphdr);
     size_t buflen = buf->len - hdrlen;
 
-    int domain_white = filter_query(buf->data + hdrlen, buflen);
+    int domain_white = dns_filter_query(buf->data + hdrlen, buflen);
     if (!domain_white) {
         return 0;
     }

@@ -107,7 +107,3 @@ logger_init(int syslog) {
     _syslog = syslog;
     return 0;
 }
-
-void
-logger_exit() {
-}

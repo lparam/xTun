@@ -17,7 +17,6 @@
 #endif
 
 int logger_init(int syslog);
-void logger_exit(void);
 void logger_stderr(const char *msg, ...);
 void logger_log(uint32_t level, const char *msg, ...);
 

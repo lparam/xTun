@@ -31,7 +31,7 @@ make package/xTun/openwrt/compile
 
 ```bash
 $ xTun -h
-xTun Version: xTun/0.6.1 Maintained by lparam
+xTun Version: v0.6.3-6d59478 Maintained by lparam
 Usage:
   xTun [options]
 Options:
@@ -49,6 +49,7 @@ Options:
   [--signal <signal>]    send signal to xTun: quit, stop
   [-t --tcp]             use TCP rather than UDP (only available on client mode)
   [-n]                   non daemon mode
+  [--debug]              debug mode
   [-h, --help]           this help
   [-v, --version]        show version
   [-V]                   verbose mode

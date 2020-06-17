@@ -16,6 +16,7 @@
 #include "tun.h"
 #include "tcp.h"
 #include "udp.h"
+#include "dns.h"
 #ifdef ANDROID
 #include "android.h"
 #endif
@@ -32,16 +33,31 @@ static void loop_close(uv_loop_t *loop);
 static void signal_cb(uv_signal_t *handle, int signum);
 static void signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data);
 
+static char *ignore_list[] = {"224.0.0.22", "224.0.0.251", "239.255.255.250"};
 
 int
 tun_write(int tunfd, uint8_t *buf, ssize_t len) {
+    if (debug) {
+        struct iphdr *iphdr = (struct iphdr *) buf;
+        uint16_t frag = iphdr->frag_off & htons(0x1fff);
+        if ((iphdr->protocol == IPPROTO_UDP) && (frag == 0)) {
+            struct udphdr *udph = (struct udphdr *)
+                                (buf + sizeof(struct iphdr));
+            if (ntohs(udph->dest) == DNS_PORT) {
+                size_t hdrlen = sizeof(struct iphdr) + sizeof(struct udphdr);
+                size_t buflen = len - hdrlen;
+                dns_pasre_query(buf + hdrlen, buflen);
+            }
+        }
+    }
+
     uint8_t *pos = buf;
     size_t remaining = len;
     while(remaining) {
         ssize_t sz = write(tunfd, pos, remaining);
         if(sz == -1) {
             if(errno != EAGAIN && errno != EWOULDBLOCK) {
-                logger_stderr("tun write error (%d: %s)", errno, strerror(errno));
+                logger_stderr("tun write (%d: %s)", errno, strerror(errno));
                 return -1;
             } else {
                 continue;
@@ -49,6 +65,17 @@ tun_write(int tunfd, uint8_t *buf, ssize_t len) {
         }
         pos += sz;
         remaining -= sz;
+    }
+    return 0;
+}
+
+static int
+is_ignore_addr(const char *addr) {
+    int n = sizeof(ignore_list) / sizeof(ignore_list[0]);
+    for (int i = 0; i < n; i++) {
+        if (strcmp(addr, ignore_list[i]) == 0) {
+            return 1;
+        }
     }
     return 0;
 }
@@ -80,7 +107,9 @@ route(buffer_t *tunbuf, tundev_ctx_t *ctx) {
         } else {
             in_addr_t network = iphdr->daddr & htonl(ctx->tun->netmask);
             if (network != ctx->tun->network) {
-                logger_log(LOG_WARNING, "Discard %s -> %s", saddr, daddr);
+                if (!is_ignore_addr(daddr)) {
+                    logger_log(LOG_WARNING, "Discard %s -> %s", saddr, daddr);
+                }
             } else {
                 logger_log(LOG_WARNING, "Peer is not connected: %s -> %s", saddr, daddr);
             }

@@ -34,10 +34,11 @@ enum {
     GETOPT_MTU = 128,
     GETOPT_KEEPALIVE,
     GETOPT_PID,
-    GETOPT_SIGNAL
+    GETOPT_SIGNAL,
+    GETOPT_DEBUG
 };
 
-static const char *_optString = "i:I:k:c:sb:tp:P:nVvh";
+static const char *_optString = "i:I:k:c:sb:tp:P:nDVvh";
 static const struct option _lopts[] = {
     { "",           required_argument,   NULL, 'i' },
     { "",           required_argument,   NULL, 'I' },
@@ -54,6 +55,7 @@ static const struct option _lopts[] = {
     { "signal",     required_argument,   NULL,  GETOPT_SIGNAL },
     { "",           no_argument,         NULL, 'n' },
     { "",           no_argument,         NULL, 'V' },
+    { "debug",      no_argument,         NULL,  GETOPT_DEBUG },
     { "version",    no_argument,         NULL, 'v' },
     { "help",       no_argument,         NULL, 'h' },
     { NULL,         no_argument,         NULL,  0  }
@@ -80,9 +82,11 @@ print_usage(const char *prog) {
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
          "  [-t --tcp]\t\t use TCP rather than UDP (only available on client mode)\n"
          "  [-n]\t\t\t non daemon mode\n"
+         "  [--debug] \t\t debug mode\n"
          "  [-h, --help]\t\t this help\n"
          "  [-v, --version]\t show version\n"
-         "  [-V] \t\t\t verbose mode\n");
+         "  [-V] \t\t\t verbose mode\n"
+         );
 
     exit(1);
 }
@@ -127,11 +131,14 @@ parse_opts(int argc, char *argv[]) {
         case 'n':
             daemon_mode = 0;
             break;
+        case GETOPT_DEBUG:
+            debug = 1;
+            break;
         case 'V':
             verbose = 1;
             break;
         case 'v':
-            printf("xTun version: %s \n", xTun_VER);
+            printf("%s %s\n", xTun_VER, xTun_BUILD_TIME);
             exit(0);
             break;
         case 'h':
@@ -243,7 +250,6 @@ main(int argc, char *argv[]) {
     if (daemon_mode) {
         delete_pidfile(pidfile);
     }
-    logger_exit();
 
     return 0;
 }

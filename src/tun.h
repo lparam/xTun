@@ -60,6 +60,7 @@ uv_rwlock_t clients_rwlock;
 uv_rwlock_t peers_rwlock;
 peer_t *peers[HASHSIZE];
 
+int debug;
 int verbose;
 int protocol;
 uint8_t mode;

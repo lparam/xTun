@@ -3,8 +3,13 @@
 
 #include <stdint.h>
 
-#define xTun_VERSION    "0.6.3"
-#define xTun_VER        "xTun/" xTun_VERSION
+#ifdef VERSION
+#define xTun_VER        VERSION
+#define xTun_BUILD_TIME BUILD_TIME
+#else
+#define xTun_VER        "undefined"
+#define xTun_BUILD_TIME ""
+#endif
 
 struct tundev;
 

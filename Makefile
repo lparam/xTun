@@ -26,7 +26,17 @@ OBJTREE	:= $(if $(BUILD_DIR),$(BUILD_DIR),$(CURDIR))
 SRCTREE	:= $(CURDIR)
 export SRCTREE OBJTREE
 
+TAG = $(shell git describe --always --tags --abbrev=0 | tr -d "[v\r\n]")
+COMMIT = $(shell git rev-parse --short HEAD| tr -d "[ \r\n\']")
+VERSION = v$(TAG)-$(COMMIT)
+
+ifeq ($(strip $(COMMIT)),)
+VERSION = v$(MAJOR).$(MINOR).$(PATCH)
+endif
+
 #########################################################################
+
+CPPFLAGS = -DVERSION=\"$(VERSION)\" -DBUILD_TIME=\"$(shell date '+%Y-%m-%d')\ $(shell date '+%H:%M:%S')\"
 
 ifdef HOST
 CROSS_COMPILE = $(HOST)-
@@ -49,7 +59,7 @@ ROUTER = 1
 endif
 
 ifdef CROSS_COMPILE
-CPPFLAGS = -DCROSS_COMPILE
+CPPFLAGS += -DCROSS_COMPILE
 endif
 
 CFLAGS += \
@@ -95,7 +105,7 @@ endif
 LIBS += $(OBJTREE)/3rd/libuv/.libs/libuv.a
 LIBS += $(OBJTREE)/3rd/libsodium/src/libsodium/.libs/libsodium.a
 
-LIBS += -pthread -ldl
+LIBS += -lresolv -pthread -ldl
 
 LDFLAGS += $(LIBS)
 
@@ -137,6 +147,8 @@ $(xTUN): \
 	$(OBJTREE)/src/signal.o \
 	$(OBJTREE)/src/buffer.o \
 	$(OBJTREE)/src/crypto.o \
+	$(OBJTREE)/src/dns.o \
+	$(OBJTREE)/src/local_ns_parser.o \
 	$(OBJTREE)/src/peer.o \
 	$(OBJTREE)/src/packet.o \
 	$(OBJTREE)/src/tcp.o \
@@ -153,6 +165,8 @@ $(xTUN_STATIC): \
 	$(OBJTREE)/src/buffer.o \
 	$(OBJTREE)/src/crypto.o \
 	$(OBJTREE)/src/checksum.o \
+	$(OBJTREE)/src/dns.o \
+	$(OBJTREE)/src/local_ns_parser.o \
 	$(OBJTREE)/src/android.o \
 	$(OBJTREE)/src/peer.o \
 	$(OBJTREE)/src/packet.o \

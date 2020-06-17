@@ -8,24 +8,50 @@ PASSWORD=password
 CHAIN=xTun
 COMMENT=xTun
 
+RC=0
+if [ -f /usr/bin/xTun ]; then
+    DAEMON=/usr/bin/xTun
+elif [ -f /usr/local/bin/xTun ]; then
+    DAEMON=/usr/local/bin/xTun
+fi
+
+check_running(){
+    PID=$(ps -ef | grep -v grep | grep -i "${DAEMON}" | awk '{print $2}')
+    if [ -n "$PID" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 start() {
-    xTun -i $IFACE -I $CIDR -k $PASSWORD -s -p $PORT
+    $DAEMON -i $IFACE -I $CIDR -k $PASSWORD -s -p $PORT
     net_start
 }
 
 stop() {
     net_stop
-    xTun --signal stop
+    $DAEMON --signal stop
 }
 
 shutdown() {
     net_stop
-    xTun --signal quit
+    $DAEMON --signal quit
 }
 
 restart() {
     stop
     start
+}
+
+status() {
+    check_running
+    if [ $? -eq 0 ]; then
+        echo "xTun (pid $PID) is running..."
+    else
+        echo "xTun is stopped"
+        RC=1
+    fi
 }
 
 net_start() {
@@ -41,9 +67,9 @@ net_start() {
         iptables -F $CHAIN
         iptables -Z $CHAIN
     )
-    iptables -A $CHAIN -s $CIDR -m state --state RELATED,ESTABLISHED -j ACCEPT
+    iptables -A $CHAIN -s $CIDR -m state --state NEW,RELATED,ESTABLISHED -j ACCEPT
     iptables -A $CHAIN -d $CIDR -j ACCEPT
-    iptables -A FORWARD -j $CHAIN
+    iptables -I FORWARD -j $CHAIN
 
     # Turn on MSS fix (MSS = MTU - TCP header - IP header)
     iptables -t mangle -N $CHAIN >/dev/null 2>&1 || (
@@ -75,6 +101,7 @@ show_help() {
     echo "    start     start tun"
     echo "    stop      stop tun"
     echo "    restart   restart tun"
+    echo "    status    tun status"
     echo ""
     echo "For help with each command run:"
     echo "$ProgName <command> -h|--help"
@@ -98,3 +125,5 @@ case $command in
         fi
         ;;
 esac
+
+exit $RC

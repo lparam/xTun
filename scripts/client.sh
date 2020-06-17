@@ -58,7 +58,7 @@ net_start() {
         iptables -F $CHAIN
         iptables -Z $CHAIN
     )
-    iptables -I $CHAIN 1 -i $IFACE -m state --state RELATED,ESTABLISHED -j ACCEPT
+    iptables -I $CHAIN 1 -i $IFACE -m state --state NEW,RELATED,ESTABLISHED -j ACCEPT
     iptables -I $CHAIN 1 -o $IFACE -j ACCEPT
     iptables -I FORWARD -j $CHAIN
 

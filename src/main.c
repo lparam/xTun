@@ -21,6 +21,7 @@ static int port = 1082;
 static int keepalive_interval = 0;
 static int daemon_mode = 1;
 static uint32_t parallel = 1;
+static int log_level = LOG_DEBUG;
 static char *iface = "";
 static char *ifconf;
 static char *addrbuf;
@@ -35,10 +36,11 @@ enum {
     GETOPT_KEEPALIVE,
     GETOPT_PID,
     GETOPT_SIGNAL,
+    GETOPT_LEVEL,
     GETOPT_DEBUG
 };
 
-static const char *_optString = "i:I:k:c:sb:tp:P:nDVvh";
+static const char *_optString = "i:I:k:c:sb:tp:P:nVvh";
 static const struct option _lopts[] = {
     { "",           required_argument,   NULL, 'i' },
     { "",           required_argument,   NULL, 'I' },
@@ -53,9 +55,10 @@ static const struct option _lopts[] = {
     { "keepalive",  required_argument,   NULL,  GETOPT_KEEPALIVE },
     { "pid",        required_argument,   NULL,  GETOPT_PID },
     { "signal",     required_argument,   NULL,  GETOPT_SIGNAL },
+    { "level",      required_argument,   NULL,  GETOPT_LEVEL },
+    { "debug",      no_argument,         NULL,  GETOPT_DEBUG },
     { "",           no_argument,         NULL, 'n' },
     { "",           no_argument,         NULL, 'V' },
-    { "debug",      no_argument,         NULL,  GETOPT_DEBUG },
     { "version",    no_argument,         NULL, 'v' },
     { "help",       no_argument,         NULL, 'h' },
     { NULL,         no_argument,         NULL,  0  }
@@ -76,16 +79,17 @@ print_usage(const char *prog) {
          "  [-i <iface>]\t\t interface name (e.g. tun0)\n"
          "  [-b --bind <host>]\t bind to a specific interface (only available on server mode, default: 0.0.0.0)\n"
          "  [-P <parallel>]\t number of parallel tun queues (only available on server mode & UDP)\n"
+         "  [-t --tcp]\t\t use TCP rather than UDP (only available on client mode)\n"
          "  [--pid <pid>]\t\t PID file of daemon (default: /var/run/xTun.pid)\n"
          "  [--mtu <mtu>]\t\t MTU size (default: 1426)\n"
          "  [--keepalive <second>] keepalive delay (default: 0)\n"
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
-         "  [-t --tcp]\t\t use TCP rather than UDP (only available on client mode)\n"
-         "  [-n]\t\t\t non daemon mode\n"
+         "  [--level <level>] \t\t log level: debug, info, warn, error\n"
          "  [--debug] \t\t debug mode\n"
+         "  [-n]\t\t\t non daemon mode\n"
+         "  [-V] \t\t\t verbose mode\n"
          "  [-h, --help]\t\t this help\n"
          "  [-v, --version]\t show version\n"
-         "  [-V] \t\t\t verbose mode\n"
          );
 
     exit(1);
@@ -130,6 +134,24 @@ parse_opts(int argc, char *argv[]) {
             break;
         case 'n':
             daemon_mode = 0;
+            break;
+        case GETOPT_LEVEL:
+            if (strcmp(optarg, "debug")) {
+                log_level = LOG_DEBUG;
+
+            } else if (strcmp(optarg, "info")) {
+                log_level = LOG_INFO;
+
+            } else if (strcmp(optarg, "warn")) {
+                log_level = LOG_WARNING;
+
+            } else if (strcmp(optarg, "error")) {
+                log_level = LOG_ERR;
+
+            } else {
+                fprintf(stderr, "invalid option: --level %s\n", optarg);
+                print_usage(argv[0]);
+            }
             break;
         case GETOPT_DEBUG:
             debug = 1;
@@ -176,7 +198,7 @@ parse_opts(int argc, char *argv[]) {
 
 static int
 init() {
-    logger_init(daemon_mode);
+    logger_init(daemon_mode, log_level);
 
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);

@@ -17,6 +17,7 @@
 
 static int _clean = 0;
 static int _syslog = 0;
+static int _level = LOG_INFO;
 
 #ifdef _MSC_VER
 #define vsnprintf _vsnprintf
@@ -42,6 +43,10 @@ void
 logger_log(uint32_t level, const char *msg, ...) {
     char tmp[LOG_MESSAGE_SIZE];
     char m[LOG_MESSAGE_SIZE + 64] = { 0 };
+
+    if (level > _level) {
+        return;
+    }
 
     va_list ap;
     va_start(ap, msg);
@@ -99,11 +104,12 @@ logger_stderr(const char *msg, ...) {
 }
 
 int
-logger_init(int syslog) {
+logger_init(int syslog, int level) {
     char *env_logformat = getenv("LOGFORMAT");
     if (env_logformat != NULL && strcmp("0", env_logformat) == 0) {
         _clean = 1;
     }
     _syslog = syslog;
+    _level = level;
     return 0;
 }

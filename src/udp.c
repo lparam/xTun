@@ -1,4 +1,3 @@
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -12,12 +11,9 @@
 #include <netinet/ip.h>
 #include <netinet/udp.h>
 
-#include "uv.h"
-
 #include "util.h"
 #include "logger.h"
 #include "crypto.h"
-#include "peer.h"
 #include "tun.h"
 #ifdef ANDROID
 #include "android.h"
@@ -145,6 +141,7 @@ udp_send(udp_t *udp, buffer_t *buf, struct sockaddr *addr) {
     if (rc) {
         logger_log(LOG_ERR, "UDP Write error (%d: %s)", rc, uv_strerror(rc));
         buffer_free(buf);
+        free(write_req);
     }
 }
 

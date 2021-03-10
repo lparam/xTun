@@ -85,6 +85,7 @@ tcp_client_reconnect(tcp_client_t *c) {
     c->connect_interval *= 2;
     int timeout = c->connect_interval < MAX_RETRY_INTERVAL ?
                   c->connect_interval : MAX_RETRY_INTERVAL;
+    logger_log(LOG_DEBUG, "Try to connect server, timeout: %d", timeout);
     uv_timer_start(&c->timer_reconnect, timer_expire, timeout * 1000, 0);
 }
 
@@ -163,11 +164,11 @@ keepalive(uv_timer_t *handle) {
         if (c->status == DISCONNECTED) {
             tcp_client_connect(c);
         }
-        return;
+    } else {
+        buffer_t buf;
+        packet_construct_keepalive(&buf, c->tun_ctx->tun);
+        tcp_send(&c->inet_tcp.stream, &buf, c->cipher_e);
     }
-    buffer_t buf;
-    packet_construct_keepalive(&buf, c->tun_ctx->tun);
-    tcp_send(&c->inet_tcp.stream, &buf, c->cipher_e);
 }
 
 static void
@@ -216,7 +217,9 @@ tcp_client_connect(tcp_client_t *c) {
                rc ? "successful" : "failed");
 #endif
 
-    logger_log(LOG_INFO, "Connect to server...");
+    char remote[INET_ADDRSTRLEN + 1];
+    int port = ip_name(c->server_addr, remote, sizeof(remote));
+    logger_log(LOG_INFO, "Connect to server %s:%d ...", remote, port);
 
     rc = uv_tcp_connect(&c->connect_req, &c->inet_tcp.tcp, c->server_addr, connect_cb);
     if (rc) {

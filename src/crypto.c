@@ -148,7 +148,6 @@ int
 crypto_init(const char *password) {
     return crypto_generichash(master_key, sizeof master_key,
                               (uint8_t*)password, strlen(password), NULL, 0);
-
 }
 
 int

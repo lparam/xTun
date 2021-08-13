@@ -69,15 +69,21 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
         return;
     }
 
+    char remote[INET_ADDRSTRLEN + 1];
+    if (nread <= CRYPTO_UDP_MIN_OVERHEAD) {
+        int port = ip_name(addr, remote, sizeof(remote));
+        logger_log(LOG_ERR, "Invalid UDP packet from %s:%d", remote, port);
+        return;
+    }
+
     udp_t *udp = container_of(handle, udp_t, inet_udp);
     udp->recv_buffer.len = nread;
     int rc = crypto_decrypt_with_new_salt(&udp->recv_buffer, udp->cipher);
     if (rc) {
-        char remote[INET_ADDRSTRLEN + 1];
         int port = ip_name(addr, remote, sizeof(remote));
         logger_log(LOG_ERR, "Invalid UDP packet from %s:%d", remote, port);
         if (verbose) {
-            dump_hex(udp->recv_buffer.data, udp->recv_buffer.len, "Invalid udp Packet");
+            dump_hex(udp->recv_buffer.data, udp->recv_buffer.len, "Invalid UDP Packet");
         }
         return;
     }

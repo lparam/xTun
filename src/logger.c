@@ -33,7 +33,6 @@ static const char *colors[] = {
 };
 #endif
 
-
 static void
 log2std(FILE *file, const char *msg) {
     fprintf(file, "%s", msg);

@@ -85,7 +85,7 @@ tcp_client_reconnect(tcp_client_t *c) {
     c->connect_interval *= 2;
     int timeout = c->connect_interval < MAX_RETRY_INTERVAL ?
                   c->connect_interval : MAX_RETRY_INTERVAL;
-    logger_log(LOG_DEBUG, "Try to connect server, timeout: %d", timeout);
+    logger_log(LOG_INFO, "Try to connect server, timeout: %d", timeout);
     uv_timer_start(&c->timer_reconnect, timer_expire, timeout * 1000, 0);
 }
 

@@ -84,7 +84,7 @@ print_usage(const char *prog) {
          "  [--mtu <mtu>]\t\t MTU size (default: 1426)\n"
          "  [--keepalive <second>] keepalive delay (default: 0)\n"
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
-         "  [--level <level>] \t\t log level: debug, info, warn, error\n"
+         "  [--level <level>] \t log level: debug, info, warn, error\n"
          "  [--debug] \t\t debug mode\n"
          "  [-n]\t\t\t non daemon mode\n"
          "  [-V] \t\t\t verbose mode\n"

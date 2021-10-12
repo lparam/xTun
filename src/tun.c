@@ -37,20 +37,6 @@ static char *ignore_list[] = {"224.0.0.22", "224.0.0.251", "239.255.255.250"};
 
 int
 tun_write(int tunfd, uint8_t *buf, ssize_t len) {
-    if (debug) {
-        struct iphdr *iphdr = (struct iphdr *) buf;
-        uint16_t frag = iphdr->frag_off & htons(0x1fff);
-        if ((iphdr->protocol == IPPROTO_UDP) && (frag == 0)) {
-            struct udphdr *udph = (struct udphdr *)
-                                (buf + sizeof(struct iphdr));
-            if (ntohs(udph->dest) == DNS_PORT) {
-                size_t hdrlen = sizeof(struct iphdr) + sizeof(struct udphdr);
-                size_t buflen = len - hdrlen;
-                dns_pasre_query(buf + hdrlen, buflen);
-            }
-        }
-    }
-
     uint8_t *pos = buf;
     size_t remaining = len;
     while(remaining) {
@@ -142,6 +128,7 @@ route(buffer_t *tunbuf, tundev_ctx_t *ctx) {
             }
         }
 #endif
+
         if (protocol == xTUN_TCP) {
             if (tcp_client_connected(ctx->tcp_client)) {
                 tcp_client_send(ctx->tcp_client, tunbuf);

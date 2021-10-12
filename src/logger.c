@@ -76,7 +76,7 @@ logger_log(uint32_t level, const char *msg, ...) {
         struct tm *loctime = localtime(&curtime);
         char timestr[20];
         strftime(timestr, 20, "%Y/%m/%d %H:%M:%S", loctime);
-        sprintf(m, "%s%s [%s]\033[0m: %s\n", colors[level], timestr, levels[level], tmp);
+        sprintf(m, "%s%s <%s>\033[0m %s\n", colors[level], timestr, levels[level], tmp);
         log2std(stdout, m);
 #endif
     }
@@ -97,7 +97,7 @@ logger_stderr(const char *msg, ...) {
 
     strftime(timestr, 20, "%Y/%m/%d %H:%M:%S", loctime);
     char m[300] = { 0 };
-    sprintf(m, "\033[01;31m%s [%s]\033[0m: %s\n", timestr, levels[LOG_ERR], tmp);
+    sprintf(m, "\033[01;31m%s <%s>\033[0m %s\n", timestr, levels[LOG_ERR], tmp);
 
     log2std(stderr, m);
 }

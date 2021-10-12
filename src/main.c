@@ -136,16 +136,16 @@ parse_opts(int argc, char *argv[]) {
             daemon_mode = 0;
             break;
         case GETOPT_LEVEL:
-            if (strcmp(optarg, "debug")) {
+            if (strcmp(optarg, "debug") == 0) {
                 log_level = LOG_DEBUG;
 
-            } else if (strcmp(optarg, "info")) {
+            } else if (strcmp(optarg, "info") == 0) {
                 log_level = LOG_INFO;
 
-            } else if (strcmp(optarg, "warn")) {
+            } else if (strcmp(optarg, "warn") == 0) {
                 log_level = LOG_WARNING;
 
-            } else if (strcmp(optarg, "error")) {
+            } else if (strcmp(optarg, "error") == 0) {
                 log_level = LOG_ERR;
 
             } else {

@@ -18,12 +18,12 @@ buffer_realloc(buffer_t *buf, size_t len, size_t capacity) {
     if (buf == NULL) {
         return -1;
     }
-    size_t rc = max(len, capacity);
-    if (buf->capacity < rc) {
-        buf->data = realloc(buf->data, rc);
-        buf->capacity = rc;
+    size_t sz = max(len, capacity);
+    if (buf->capacity < sz) {
+        buf->data = realloc(buf->data, sz);
+        buf->capacity = sz;
     }
-    return rc;
+    return sz;
 }
 
 void

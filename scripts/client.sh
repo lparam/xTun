@@ -58,7 +58,7 @@ net_start() {
         iptables -F $CHAIN
         iptables -Z $CHAIN
     )
-    iptables -I $CHAIN 1 -i $IFACE -m state --state RELATED,ESTABLISHED -j ACCEPT
+    iptables -I $CHAIN 1 -i $IFACE -m state --state NEW,RELATED,ESTABLISHED -j ACCEPT
     iptables -I $CHAIN 1 -o $IFACE -j ACCEPT
     iptables -I FORWARD -j $CHAIN
 
@@ -68,7 +68,7 @@ net_start() {
         iptables -t mangle -F $CHAIN
         iptables -t mangle -Z $CHAIN
     )
-    ipset -N $SETNAME iphash -exist
+    ipset -N $SETNAME iphash maxelem 655360 -exist
     iptables -t mangle -A $CHAIN -m set --match-set $SETNAME dst -j MARK --set-mark $FWMARK
     iptables -t mangle -A PREROUTING -j $CHAIN
     iptables -t mangle -A OUTPUT -j $CHAIN

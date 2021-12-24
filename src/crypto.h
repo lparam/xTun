@@ -7,6 +7,7 @@
 
 #define CRYPTO_MIN_OVERHEAD 16
 #define CRYPTO_MAX_OVERHEAD 42
+#define CRYPTO_UDP_MIN_OVERHEAD 24
 
 typedef struct cipher_ctx cipher_ctx_t;
 

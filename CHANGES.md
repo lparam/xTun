@@ -1,3 +1,10 @@
+v0.6.4 (2021-12-25)
+-----------
+* Feature: log level
+* Feature: android dns resolver
+* Fix: free request buffer
+
+
 v0.6.3 (2020-1-05)
 -----------
 * Feature: support padavan

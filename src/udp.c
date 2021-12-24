@@ -1,4 +1,3 @@
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -12,12 +11,9 @@
 #include <netinet/ip.h>
 #include <netinet/udp.h>
 
-#include "uv.h"
-
 #include "util.h"
 #include "logger.h"
 #include "crypto.h"
-#include "peer.h"
 #include "tun.h"
 #ifdef ANDROID
 #include "android.h"
@@ -73,15 +69,21 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
         return;
     }
 
+    char remote[INET_ADDRSTRLEN + 1];
+    if (nread <= CRYPTO_UDP_MIN_OVERHEAD) {
+        int port = ip_name(addr, remote, sizeof(remote));
+        logger_log(LOG_ERR, "Invalid UDP packet from %s:%d", remote, port);
+        return;
+    }
+
     udp_t *udp = container_of(handle, udp_t, inet_udp);
     udp->recv_buffer.len = nread;
     int rc = crypto_decrypt_with_new_salt(&udp->recv_buffer, udp->cipher);
     if (rc) {
-        char remote[INET_ADDRSTRLEN + 1];
         int port = ip_name(addr, remote, sizeof(remote));
         logger_log(LOG_ERR, "Invalid UDP packet from %s:%d", remote, port);
         if (verbose) {
-            dump_hex(udp->recv_buffer.data, udp->recv_buffer.len, "Invalid udp Packet");
+            dump_hex(udp->recv_buffer.data, udp->recv_buffer.len, "Invalid UDP Packet");
         }
         return;
     }
@@ -95,16 +97,16 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
             return logger_log(LOG_ERR, "Invalid peer: %s", pa);
         }
 
-        uv_rwlock_rdlock(&peers_rwlock);
+        rwlock_rlock(&peers_rwlock);
         peer_t *peer = peer_lookup(iphdr->saddr, peers);
-        uv_rwlock_rdunlock(&peers_rwlock);
+        rwlock_runlock(&peers_rwlock);
         if (peer == NULL) {
             char saddr[24] = {0}, daddr[24] = {0};
             parse_addr(iphdr, saddr, daddr);
             logger_log(LOG_NOTICE, "[UDP] Cache miss: %s -> %s", saddr, daddr);
-            uv_rwlock_wrlock(&peers_rwlock);
+            rwlock_wlock(&peers_rwlock);
             peer = peer_add(iphdr->saddr, (struct sockaddr *) addr, peers);
-            uv_rwlock_wrunlock(&peers_rwlock);
+            rwlock_wunlock(&peers_rwlock);
 
         } else {
             if (memcmp(&peer->remote_addr, addr, sizeof(*addr))) {
@@ -145,6 +147,7 @@ udp_send(udp_t *udp, buffer_t *buf, struct sockaddr *addr) {
     if (rc) {
         logger_log(LOG_ERR, "UDP Write error (%d: %s)", rc, uv_strerror(rc));
         buffer_free(buf);
+        free(write_req);
     }
 }
 

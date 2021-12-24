@@ -17,6 +17,7 @@
 
 static int _clean = 0;
 static int _syslog = 0;
+static int _level = LOG_INFO;
 
 #ifdef _MSC_VER
 #define vsnprintf _vsnprintf
@@ -32,7 +33,6 @@ static const char *colors[] = {
 };
 #endif
 
-
 static void
 log2std(FILE *file, const char *msg) {
     fprintf(file, "%s", msg);
@@ -42,6 +42,10 @@ void
 logger_log(uint32_t level, const char *msg, ...) {
     char tmp[LOG_MESSAGE_SIZE];
     char m[LOG_MESSAGE_SIZE + 64] = { 0 };
+
+    if (level > _level) {
+        return;
+    }
 
     va_list ap;
     va_start(ap, msg);
@@ -72,7 +76,7 @@ logger_log(uint32_t level, const char *msg, ...) {
         struct tm *loctime = localtime(&curtime);
         char timestr[20];
         strftime(timestr, 20, "%Y/%m/%d %H:%M:%S", loctime);
-        sprintf(m, "%s%s [%s]\033[0m: %s\n", colors[level], timestr, levels[level], tmp);
+        sprintf(m, "%s%s <%s>\033[0m %s\n", colors[level], timestr, levels[level], tmp);
         log2std(stdout, m);
 #endif
     }
@@ -93,21 +97,18 @@ logger_stderr(const char *msg, ...) {
 
     strftime(timestr, 20, "%Y/%m/%d %H:%M:%S", loctime);
     char m[300] = { 0 };
-    sprintf(m, "\033[01;31m%s [%s]\033[0m: %s\n", timestr, levels[LOG_ERR], tmp);
+    sprintf(m, "\033[01;31m%s <%s>\033[0m %s\n", timestr, levels[LOG_ERR], tmp);
 
     log2std(stderr, m);
 }
 
 int
-logger_init(int syslog) {
+logger_init(int syslog, int level) {
     char *env_logformat = getenv("LOGFORMAT");
     if (env_logformat != NULL && strcmp("0", env_logformat) == 0) {
         _clean = 1;
     }
     _syslog = syslog;
+    _level = level;
     return 0;
-}
-
-void
-logger_exit() {
 }

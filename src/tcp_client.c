@@ -7,6 +7,7 @@
 #include "crypto.h"
 #include "logger.h"
 #include "packet.h"
+#include "rwlock.h"
 #include "util.h"
 #include "tun.h"
 #include "tcp.h"
@@ -15,14 +16,16 @@
 #endif
 
 
-#define DISCONNECTED   0
-#define CONNECTING     1
-#define CONNECTED      2
+#define DISCONNECTING  0
+#define DISCONNECTED   1
+#define CONNECTING     2
+#define CONNECTED      3
 
-#define MAX_RETRY_INTERVAL 60
+#define DEFAULT_INTERVAL    5
+#define MAX_RETRY_INTERVAL  80
 
 typedef struct tcp_client {
-    int status;
+    ATOM_INT status;
     int connect_interval;
     int keepalive_interval;
     int inet_tcp_fd;
@@ -50,10 +53,11 @@ tcp_client_new(tundev_ctx_t *ctx, struct sockaddr *addr) {
     packet_reset(&c->packet);
     c->cipher_e = cipher_new();
     c->cipher_d = cipher_new();
-    c->connect_interval = 5;
+    c->connect_interval = DEFAULT_INTERVAL;
     c->tun_ctx = ctx;
     c->server_addr = addr;
     c->keepalive_interval = ctx->tun->keepalive_interval;
+    ATOM_INIT(&c->status, DISCONNECTED);
     return c;
 }
 
@@ -67,7 +71,7 @@ tcp_client_free(tcp_client_t *c) {
 
 static void
 tcp_client_reset(tcp_client_t *c) {
-    c->connect_interval = 5;
+    c->connect_interval = DEFAULT_INTERVAL;
     cipher_reset(c->cipher_e);
     cipher_reset(c->cipher_d);
     buffer_reset(&c->recv_buffer);
@@ -83,19 +87,28 @@ timer_expire(uv_timer_t *handle) {
 static void
 tcp_client_reconnect(tcp_client_t *c) {
     c->connect_interval *= 2;
-    int timeout = c->connect_interval < MAX_RETRY_INTERVAL ?
-                  c->connect_interval : MAX_RETRY_INTERVAL;
-    uv_timer_start(&c->timer_reconnect, timer_expire, timeout * 1000, 0);
+    if (c->connect_interval > MAX_RETRY_INTERVAL) {
+        c->connect_interval = DEFAULT_INTERVAL;
+    }
+    logger_log(LOG_INFO, "Try to connect to the server after %d seconds", c->connect_interval);
+    uv_timer_start(&c->timer_reconnect, timer_expire, c->connect_interval * 1000, 0);
 }
 
 static void
 close_cb(uv_handle_t *handle) {
+    logger_log(LOG_DEBUG, "TCP connection is closed");
     tcp_client_t *c = container_of(handle, tcp_client_t, inet_tcp.handle);
-    c->status = DISCONNECTED;
+    ATOM_STORE(&c->status, DISCONNECTED);
 }
 
 static void
 tcp_client_close(tcp_client_t *c) {
+    ATOM_STORE(&c->status, DISCONNECTING);
+    if (uv_is_closing(&c->inet_tcp.handle)) {
+        logger_log(LOG_WARNING, "TCP connection is closing");
+        return;
+    }
+    logger_log(LOG_DEBUG, "Close the TCP connection");
     uv_close(&c->inet_tcp.handle, close_cb);
 }
 
@@ -112,11 +125,11 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 
     if (nread <= 0) {
         if (nread < 0) {
-            if (nread != UV_EOF) {
-                logger_log(LOG_ERR, "Receive from server failed (%d: %s)",
-                           nread, uv_strerror(nread));
+            if (nread == UV_EOF) {
+                logger_log(LOG_INFO, "The server is closed");
             } else {
-                logger_log(LOG_INFO, "Server close");
+                logger_log(LOG_ERR, "Receive from server (%d: %s)",
+                           nread, uv_strerror(nread));
             }
             tcp_client_close(c);
         }
@@ -159,29 +172,31 @@ tcp_client_recv(tcp_client_t *c) {
 static void
 keepalive(uv_timer_t *handle) {
     tcp_client_t *c = container_of(handle, tcp_client_t, timer_keepalive);
-    if (c->status != CONNECTED) {
-        if (c->status == DISCONNECTED) {
+    if (ATOM_LOAD(&c->status) != CONNECTED) {
+        if (ATOM_LOAD(&c->status) == DISCONNECTED) {
             tcp_client_connect(c);
         }
-        return;
+
+    } else {
+        buffer_t buf;
+        packet_construct_keepalive(&buf, c->tun_ctx->tun);
+        tcp_send(&c->inet_tcp.stream, &buf, c->cipher_e);
     }
-    buffer_t buf;
-    packet_construct_keepalive(&buf, c->tun_ctx->tun);
-    tcp_send(&c->inet_tcp.stream, &buf, c->cipher_e);
 }
 
 static void
 connect_cb(uv_connect_t *req, int status) {
     tcp_client_t *c = container_of(req, tcp_client_t, connect_req);
     if (status == 0) {
-        c->status = CONNECTED;
+	    ATOM_STORE(&c->status, CONNECTED);
         uv_timer_stop(&c->timer_reconnect);
         tcp_client_reset(c);
         tcp_client_recv(c);
 
     } else {
+	    ATOM_STORE(&c->status, DISCONNECTED);
         if (status != UV_ECANCELED) {
-            logger_log(LOG_ERR, "Connect to server failed (%d: %s)",
+            logger_log(LOG_ERR, "Failed to Connect to server (%d: %s)",
                        status, uv_strerror(status));
             uv_close(&c->inet_tcp.handle, NULL);
             tcp_client_reconnect(c);
@@ -216,15 +231,16 @@ tcp_client_connect(tcp_client_t *c) {
                rc ? "successful" : "failed");
 #endif
 
-    logger_log(LOG_INFO, "Connect to server...");
+    char remote[INET_ADDRSTRLEN + 1];
+    int port = ip_name(c->server_addr, remote, sizeof(remote));
+    logger_log(LOG_INFO, "Connect to server %s:%d ...", remote, port);
 
     rc = uv_tcp_connect(&c->connect_req, &c->inet_tcp.tcp, c->server_addr, connect_cb);
     if (rc) {
-        /* TODO: reconnect */
         logger_log(LOG_ERR, "Connect to server error (%d: %s)",
                    rc, uv_strerror(rc));
     } else {
-        c->status = CONNECTING;
+	    ATOM_STORE(&c->status, CONNECTING);
     }
 }
 
@@ -243,7 +259,7 @@ tcp_client_start(tcp_client_t *c, uv_loop_t *loop) {
 void
 tcp_client_stop(tcp_client_t *c) {
     if (uv_is_active(&c->inet_tcp.handle)) {
-        uv_close(&c->inet_tcp.handle, NULL);
+        uv_tcp_close_reset(&c->inet_tcp.tcp, NULL);
     }
     uv_close((uv_handle_t *) &c->timer_reconnect, NULL);
     if (c->keepalive_interval) {
@@ -251,15 +267,19 @@ tcp_client_stop(tcp_client_t *c) {
     }
 }
 
-void
+int
 tcp_client_send(tcp_client_t *c, buffer_t *buf) {
-    tcp_send(&c->inet_tcp.stream, buf, c->cipher_e);
+    int rc = tcp_send(&c->inet_tcp.stream, buf, c->cipher_e);
+    if (rc) {
+        tcp_client_close(c);
+    }
+    return rc;
 }
 
 int tcp_client_connected(tcp_client_t *c) {
-    return c->status == CONNECTED;
+    return ATOM_LOAD(&c->status) == CONNECTED;
 }
 
 int tcp_client_disconnected(tcp_client_t *c) {
-    return c->status == DISCONNECTED;
+    return ATOM_LOAD(&c->status) == DISCONNECTED;
 }

@@ -65,7 +65,7 @@ endif
 CFLAGS += \
 	-O2	\
 	-g \
-	-std=gnu99 \
+	-std=gnu11 \
 	-Wall \
 	$(PLATFORM_CFLAGS)
 

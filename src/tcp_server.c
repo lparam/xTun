@@ -165,16 +165,16 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         }
 
         if (c->peer == NULL) {
-            uv_rwlock_rdlock(&peers_rwlock);
+            rwlock_rlock(&peers_rwlock);
             peer_t *peer = peer_lookup(iphdr->saddr, peers);
-            uv_rwlock_rdunlock(&peers_rwlock);
+            rwlock_runlock(&peers_rwlock);
             if (peer == NULL) {
                 char saddr[24] = {0}, daddr[24] = {0};
                 parse_addr(iphdr, saddr, daddr);
                 logger_log(LOG_NOTICE, "[TCP] Cache miss: %s -> %s", saddr, daddr);
-                uv_rwlock_wrlock(&peers_rwlock);
+                rwlock_wlock(&peers_rwlock);
                 peer = peer_add(iphdr->saddr, &c->addr, peers);
-                uv_rwlock_wrunlock(&peers_rwlock);
+                rwlock_wunlock(&peers_rwlock);
 
             } else {
                 if (peer->data) {
@@ -259,14 +259,18 @@ tcp_server_start(tcp_server_t *s, uv_loop_t *loop) {
         exit(1);
     }
 
-    uv_tcp_bind(&s->inet_tcp.tcp, s->addr, 0);
-    if (rc) {
+    if ((rc = uv_tcp_bind(&s->inet_tcp.tcp, s->addr, 0))) {
         logger_stderr("tcp bind error (%d: %s)", rc, uv_strerror(rc));
         exit(1);
     }
 
+    if ((rc = uv_tcp_simultaneous_accepts(&s->inet_tcp.tcp, 1))) {
+        logger_stderr("tcp simultaneous accept (%d: %s)", rc, uv_strerror(rc));
+        exit(1);
+    }
+
     s->inet_tcp.tcp.data = s->tun_ctx;
-    rc = uv_listen(&s->inet_tcp.stream, 128, accept_cb);
+    rc = uv_listen(&s->inet_tcp.stream, SOMAXCONN, accept_cb);
     if (rc) {
         logger_stderr("tcp listen error (%d: %s)", rc, uv_strerror(rc));
         exit(1);
@@ -289,7 +293,10 @@ void
 tcp_server_send(peer_t *peer, buffer_t *buf) {
     client_t *client = peer->data;
     if (client) {
-        tcp_send(&client->handle.stream, buf, client->cipher_e);
+        int rc = tcp_send(&client->handle.stream, buf, client->cipher_e);
+        if (rc) {
+            client_close(client);
+        }
     } else {
         buffer_free(buf);
     }

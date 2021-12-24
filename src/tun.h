@@ -3,11 +3,13 @@
 
 #include <linux/if.h>
 
+#include "uv.h"
+
+#include "rwlock.h"
 #include "packet.h"
 #include "peer.h"
 #include "udp.h"
 #include "tcp.h"
-#include "uv.h"
 
 
 /* MTU of VPN tunnel device. Use the following formula to calculate:
@@ -57,7 +59,7 @@ typedef struct tundev {
 } tundev_t;
 
 uv_rwlock_t clients_rwlock;
-uv_rwlock_t peers_rwlock;
+rwlock_t peers_rwlock;
 peer_t *peers[HASHSIZE];
 
 int debug;

@@ -67,7 +67,7 @@ is_ignore_addr(const char *addr) {
 }
 
 static int
-route(buffer_t *tunbuf, tundev_ctx_t *ctx) {
+dispatch(buffer_t *tunbuf, tundev_ctx_t *ctx) {
     struct iphdr *iphdr = (struct iphdr *) tunbuf->data;
     if (iphdr->version != 4) {
         logger_log(LOG_WARNING, "Discard non-IPv4 packet");
@@ -78,9 +78,9 @@ route(buffer_t *tunbuf, tundev_ctx_t *ctx) {
     parse_addr(iphdr, saddr, daddr);
 
     if (mode == xTUN_SERVER) {
-        uv_rwlock_rdlock(&peers_rwlock);
+        rwlock_rlock(&peers_rwlock);
         peer_t *peer = peer_lookup(iphdr->daddr, peers);
-        uv_rwlock_rdunlock(&peers_rwlock);
+        rwlock_runlock(&peers_rwlock);
         if (peer) {
             // TODO: use peerops_t
             assert(peer->protocol == xTUN_TCP || peer->protocol == xTUN_UDP);
@@ -162,8 +162,7 @@ poll_cb(uv_poll_t *watcher, int status, int events) {
     }
     tunbuf.len = n;
 
-    int rc = route(&tunbuf, ctx);
-    if (rc) {
+    if (dispatch(&tunbuf, ctx)) {
         buffer_free(&tunbuf);
     }
 }
@@ -220,7 +219,7 @@ tun_alloc(const char *iface, uint32_t parallel) {
 
     for (i = 0; i < nqueues; i++) {
         if ((fd = open("/dev/net/tun", O_RDWR | O_NONBLOCK)) < 0 ) {
-            logger_stderr("Open /dev/net/tun: %s", strerror(errno));
+            logger_stderr("Open /dev/net/tun (%s)", strerror(errno));
             goto err;
         }
         err = ioctl(fd, TUNSETIFF, (void *)&ifr);
@@ -228,6 +227,7 @@ tun_alloc(const char *iface, uint32_t parallel) {
             err = errno;
             (void) close(fd);
             errno = err;
+            logger_stderr("Config tun (%s)", strerror(errno));
             goto err;
         }
         tundev_ctx_t *ctx = &tun->contexts[i];
@@ -533,7 +533,7 @@ tun_run(tundev_t *tun, const char *server, int port) {
     uv_loop_t *loop = uv_default_loop();
 
     if (mode == xTUN_SERVER) {
-        uv_rwlock_init(&peers_rwlock);
+        rwlock_init(&peers_rwlock);
         uv_rwlock_init(&clients_rwlock);
         peer_init(peers);
     }
@@ -590,7 +590,6 @@ tun_run(tundev_t *tun, const char *server, int port) {
     }
 
     if (mode == xTUN_SERVER) {
-        uv_rwlock_destroy(&peers_rwlock);
         uv_rwlock_destroy(&clients_rwlock);
         peer_destroy(peers);
     }

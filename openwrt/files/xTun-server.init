@@ -1,0 +1,62 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006-2014 OpenWrt.org
+
+START=72
+STOP=30
+FIREWALL_RELOAD=0
+
+IFACE=tun0
+CIDR=10.0.2.1/24
+PORT=1082
+PASSWORD=password
+
+CHAIN=xTun
+COMMENT=xTun
+
+start() {
+    xTun -i $IFACE -I $CIDR -k $PASSWORD -s -p $PORT
+    net_start
+}
+
+stop() {
+    net_stop
+    xTun --signal stop
+}
+
+shutdown() {
+    net_stop
+    xTun --signal quit
+}
+
+net_start() {
+    # Turn on IP forwarding
+    sysctl -w net.ipv4.ip_forward=1 >/dev/null
+
+    # turn on NAT over VPN
+    if !(iptables-save -t nat | grep -q $CHAIN); then
+        iptables -t nat -A POSTROUTING -s $CIDR ! -d $CIDR -m comment --comment $COMMENT -j MASQUERADE
+    fi
+    iptables -N $CHAIN >/dev/null 2>&1 || (
+        iptables -D FORWARD -j $CHAIN
+        iptables -F $CHAIN
+        iptables -Z $CHAIN
+    )
+    iptables -A $CHAIN -s $CIDR -m conntrack --ctstate ESTABLISHED,RELATED,ESTABLISHED -j ACCEPT
+    iptables -A $CHAIN -d $CIDR -j ACCEPT
+    iptables -I FORWARD -j $CHAIN
+
+    # Turn on MSS fix (MSS = MTU - TCP header - IP header)
+    iptables -t mangle -A FORWARD -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu -m comment --comment $COMMENT
+}
+
+net_stop() {
+    # Turn off NAT over VPN
+    iptables -t nat -D POSTROUTING -s $CIDR ! -d $CIDR -m comment --comment $COMMENT -j MASQUERADE 2>/dev/null
+
+    iptables -D FORWARD -j $CHAIN 2>/dev/null
+    iptables -F $CHAIN 2>/dev/null
+    iptables -X $CHAIN 2>/dev/null
+
+    # Turn off MSS fix (MSS = MTU - TCP header - IP header)
+    iptables -t mangle -D FORWARD -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu -m comment --comment $COMMENT 2>/dev/null
+}

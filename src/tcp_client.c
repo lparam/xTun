@@ -102,14 +102,26 @@ close_cb(uv_handle_t *handle) {
 }
 
 static void
+shutdown_cb(uv_shutdown_t *req, int status) {
+    if (status != 0) {
+        logger_log(LOG_ERR, "TCP shutdown (%d: %s)",
+            status, uv_strerror(status));
+    }
+    logger_log(LOG_DEBUG, "Close the TCP connection");
+    uv_close((uv_handle_t*)req->handle, close_cb);
+    free(req);
+}
+
+static void
 tcp_client_close(tcp_client_t *c) {
     ATOM_STORE(&c->status, DISCONNECTING);
     if (uv_is_closing(&c->inet_tcp.handle)) {
         logger_log(LOG_WARNING, "TCP connection is closing");
         return;
     }
-    logger_log(LOG_DEBUG, "Close the TCP connection");
-    uv_close(&c->inet_tcp.handle, close_cb);
+    logger_log(LOG_DEBUG, "Shutdown the TCP connection");
+    uv_shutdown_t *req = malloc(sizeof *req);
+    uv_shutdown(req, &c->inet_tcp.stream, shutdown_cb);
 }
 
 static void
@@ -188,7 +200,11 @@ static void
 connect_cb(uv_connect_t *req, int status) {
     tcp_client_t *c = container_of(req, tcp_client_t, connect_req);
     if (status == 0) {
-	    ATOM_STORE(&c->status, CONNECTED);
+        char remote[INET_ADDRSTRLEN + 1];
+        int port = ip_name(c->server_addr, remote, sizeof(remote));
+        logger_log(LOG_INFO, "Successfully connected to server %s:%d", remote, port);
+
+        ATOM_STORE(&c->status, CONNECTED);
         uv_timer_stop(&c->timer_reconnect);
         tcp_client_reset(c);
         tcp_client_recv(c);

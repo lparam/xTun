@@ -12,14 +12,6 @@
 
 static void
 send_cb(uv_write_t *req, int status) {
-    if (status) {
-        logger_log(LOG_ERR, "TCP send (%d: %s)",
-                   status, uv_strerror(status));
-        if (!uv_is_closing((uv_handle_t *) req->handle)) {
-            logger_log(LOG_DEBUG, "Close the TCP stream");
-            uv_close((uv_handle_t *) req->handle, NULL);
-        }
-    }
     uv_buf_t *buf_hdr = (uv_buf_t *) (req + 1);
     uv_buf_t *buf_data = buf_hdr + 1;
     buffer_t *hdr = container_of(&buf_hdr->base, buffer_t, data);

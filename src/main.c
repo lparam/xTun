@@ -253,7 +253,6 @@ main(int argc, char *argv[]) {
     struct sockaddr addr;
     int rc = resolve_addr(addrbuf, port, &addr);
     if (rc) {
-        logger_stderr("Invalid address");
         return 1;
     }
 

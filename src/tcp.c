@@ -12,6 +12,9 @@
 
 static void
 send_cb(uv_write_t *req, int status) {
+    if (status && status != UV_ECANCELED) {
+        logger_log(LOG_ERR, "TCP send (%d: %s)", status, uv_strerror(status));
+    }
     uv_buf_t *buf_hdr = (uv_buf_t *) (req + 1);
     uv_buf_t *buf_data = buf_hdr + 1;
     buffer_t *hdr = container_of(&buf_hdr->base, buffer_t, data);

@@ -98,7 +98,7 @@ tcp_client_reconnect(tcp_client_t *c) {
 
 static void
 close_cb(uv_handle_t *handle) {
-    logger_log(LOG_DEBUG, "TCP connection is closed");
+    logger_log(LOG_INFO, "TCP connection is closed");
     tcp_client_t *c = container_of(handle, tcp_client_t, inet_tcp.handle);
     ATOM_STORE(&c->status, DISCONNECTED);
 }
@@ -109,15 +109,7 @@ shutdown_cb(uv_shutdown_t *req, int status) {
         logger_log(LOG_ERR, "TCP shutdown (%d: %s)",
             status, uv_strerror(status));
     }
-    /*tcp_client_t *c = container_of(req->handle, tcp_client_t, inet_tcp.handle);
-    if (uv_is_closing(&c->inet_tcp.handle)) {
-        logger_log(LOG_WARNING, "TCP connection is closing");
-    } else {
-        // uv_sleep(100);
-        logger_log(LOG_DEBUG, "Close the TCP connection");
-        uv_close((uv_handle_t*) req->handle, close_cb);
-    }*/
-    logger_log(LOG_DEBUG, "Close the TCP connection");
+    logger_log(LOG_INFO, "Close the TCP connection");
     uv_close((uv_handle_t*) req->handle, close_cb);
     free(req);
 }
@@ -125,9 +117,13 @@ shutdown_cb(uv_shutdown_t *req, int status) {
 static void
 tcp_client_close(tcp_client_t *c) {
     ATOM_STORE(&c->status, DISCONNECTING);
-    logger_log(LOG_DEBUG, "Shutdown the TCP connection");
+    logger_log(LOG_INFO, "Shutdown the TCP connection");
     uv_shutdown_t *req = malloc(sizeof *req);
-    uv_shutdown(req, &c->inet_tcp.stream, shutdown_cb);
+    int rc = uv_shutdown(req, &c->inet_tcp.stream, shutdown_cb);
+    if (rc) {
+        req->handle = &c->inet_tcp.stream;
+        shutdown_cb(req, rc);
+    }
 }
 
 static void

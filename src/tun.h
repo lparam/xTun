@@ -65,6 +65,7 @@ peer_t *peers[HASHSIZE];
 int debug;
 int verbose;
 int protocol;
+int multicast;
 uint8_t mode;
 
 #ifdef ANDROID

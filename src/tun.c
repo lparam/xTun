@@ -33,8 +33,6 @@ static void loop_close(uv_loop_t *loop);
 static void signal_cb(uv_signal_t *handle, int signum);
 static void signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data);
 
-static char *ignore_list[] = {"224.0.0.22", "224.0.0.251", "239.255.255.250"};
-
 int
 tun_write(int tunfd, uint8_t *buf, ssize_t len) {
     uint8_t *pos = buf;
@@ -56,26 +54,20 @@ tun_write(int tunfd, uint8_t *buf, ssize_t len) {
 }
 
 static int
-is_ignore_addr(const char *addr) {
-    int n = sizeof(ignore_list) / sizeof(ignore_list[0]);
-    for (int i = 0; i < n; i++) {
-        if (strcmp(addr, ignore_list[i]) == 0) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static int
 dispatch(buffer_t *tunbuf, tundev_ctx_t *ctx) {
+    char saddr[24] = {0}, daddr[24] = {0};
     struct iphdr *iphdr = (struct iphdr *) tunbuf->data;
+
     if (iphdr->version != 4) {
         logger_log(LOG_WARNING, "Discard non-IPv4 packet");
         return 1;
     }
 
-    char saddr[24] = {0}, daddr[24] = {0};
-    parse_addr(iphdr, saddr, daddr);
+    if (multicast && IN_MULTICAST(ntohl(iphdr->daddr))) {
+        parse_addr(iphdr, saddr, daddr);
+        logger_log(LOG_DEBUG, "Discard Multicast %s -> %s", saddr, daddr);
+        return 1;
+    }
 
     if (mode == xTUN_SERVER) {
         rwlock_rlock(&peers_rwlock);
@@ -92,11 +84,8 @@ dispatch(buffer_t *tunbuf, tundev_ctx_t *ctx) {
 
         } else {
             in_addr_t network = iphdr->daddr & htonl(ctx->tun->netmask);
-            if (network != ctx->tun->network) {
-                if (!is_ignore_addr(daddr)) {
-                    logger_log(LOG_WARNING, "Discard %s -> %s", saddr, daddr);
-                }
-            } else {
+            if (network == ctx->tun->network) {
+                parse_addr(iphdr, saddr, daddr);
                 logger_log(LOG_WARNING, "Peer is not connected: %s -> %s", saddr, daddr);
             }
             return 1;
@@ -105,6 +94,7 @@ dispatch(buffer_t *tunbuf, tundev_ctx_t *ctx) {
     } else {
         in_addr_t network = iphdr->saddr & htonl(ctx->tun->netmask);
         if (network != ctx->tun->network) {
+            parse_addr(iphdr, saddr, daddr);
             logger_log(LOG_WARNING, "Discard %s -> %s", saddr, daddr);
             return 1;
         }

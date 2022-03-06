@@ -21,7 +21,7 @@ static int port = 1082;
 static int keepalive_interval = 0;
 static int daemon_mode = 1;
 static uint32_t parallel = 1;
-static int log_level = LOG_DEBUG;
+static int log_level = LOG_INFO;
 static char *iface = "";
 static char *ifconf;
 static char *addrbuf;
@@ -33,6 +33,7 @@ int signal_process(char *signal, const char *pidfile);
 
 enum {
     GETOPT_MTU = 128,
+    GETOPT_MULTICAST,
     GETOPT_KEEPALIVE,
     GETOPT_PID,
     GETOPT_SIGNAL,
@@ -52,6 +53,7 @@ static const struct option _lopts[] = {
     { "",           required_argument,   NULL, 'P' },
     { "tcp",        no_argument,         NULL, 't' },
     { "mtu",        required_argument,   NULL,  GETOPT_MTU },
+    { "multicast",  no_argument,         NULL,  GETOPT_MULTICAST },
     { "keepalive",  required_argument,   NULL,  GETOPT_KEEPALIVE },
     { "pid",        required_argument,   NULL,  GETOPT_PID },
     { "signal",     required_argument,   NULL,  GETOPT_SIGNAL },
@@ -82,6 +84,7 @@ print_usage(const char *prog) {
          "  [-t --tcp]\t\t use TCP rather than UDP (only available on client mode)\n"
          "  [--pid <pid>]\t\t PID file of daemon (default: /var/run/xTun.pid)\n"
          "  [--mtu <mtu>]\t\t MTU size (default: 1426)\n"
+         "  [--multicast] \t enable multicast\n"
          "  [--keepalive <second>] keepalive delay (default: 0)\n"
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
          "  [--level <level>] \t log level: debug, info, warn, error\n"
@@ -172,6 +175,9 @@ parse_opts(int argc, char *argv[]) {
             if(!mtu || mtu < 0 || mtu > 4096) {
                 mtu = MTU;
             }
+            break;
+        case GETOPT_MULTICAST:
+            multicast = 1;
             break;
         case GETOPT_KEEPALIVE:
             keepalive_interval = strtol(optarg, NULL, 10);

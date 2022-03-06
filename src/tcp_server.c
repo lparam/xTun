@@ -124,13 +124,13 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 
     if (nread <= 0) {
         if (nread < 0) {
+            port = ip_name(&c->addr, remote, sizeof(remote));
             if (nread != UV_EOF) {
-                logger_log(LOG_ERR, "Receive from client failed (%d: %s)",
-                        nread, uv_strerror(nread));
+                logger_log(LOG_ERR, "Receive from cid:%"PRIu64" - %s:%d (%d: %s)",
+                           c->cid, remote, port, nread, uv_strerror(nread));
             } else {
-                port = ip_name(&c->addr, remote, sizeof(remote));
                 logger_log(LOG_INFO, "cid:%"PRIu64" - %s:%d close",
-                        c->cid, remote, port);
+                           c->cid, remote, port);
             }
             client_close(c);
         }

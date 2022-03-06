@@ -5,7 +5,6 @@ START=72
 STOP=30
 FIREWALL_RELOAD=0
 
-IFACE=tun0
 CIDR=10.0.2.1/24
 PORT=1082
 PASSWORD=password
@@ -27,7 +26,7 @@ start() {
     if [ $? -eq 0 ]; then
         echo "xTun (pid $PID) is running..."
     else
-        xTun -i $IFACE -I $CIDR -k $PASSWORD -s -p $PORT
+        xTun -I $CIDR -k $PASSWORD -s -p $PORT
         net_start
     fi
 }

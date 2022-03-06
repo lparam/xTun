@@ -20,6 +20,7 @@
 #define DISCONNECTED   1
 #define CONNECTING     2
 #define CONNECTED      3
+#define RECONNECTING   4
 
 #define DEFAULT_INTERVAL    5
 #define MAX_RETRY_INTERVAL  80
@@ -81,19 +82,20 @@ tcp_client_reset(tcp_client_t *c) {
 static void
 timer_expire(uv_timer_t *handle) {
     tcp_client_t *c = container_of(handle, tcp_client_t, timer_reconnect);
-    if (ATOM_LOAD(&c->status) == DISCONNECTED) {
-        tcp_client_connect(c);
-    }
+    assert(ATOM_LOAD(&c->status) == RECONNECTING);
+    tcp_client_connect(c);
 }
 
 static void
 tcp_client_reconnect(tcp_client_t *c) {
+    assert(uv_timer_get_due_in(&c->timer_reconnect) == 0);
+    ATOM_STORE(&c->status, RECONNECTING);
+    logger_log(LOG_INFO, "Try to connect to the server after %d seconds", c->connect_interval);
+    uv_timer_start(&c->timer_reconnect, timer_expire, c->connect_interval * 1000, 0);
     c->connect_interval *= 2;
     if (c->connect_interval > MAX_RETRY_INTERVAL) {
         c->connect_interval = DEFAULT_INTERVAL;
     }
-    logger_log(LOG_INFO, "Try to connect to the server after %d seconds", c->connect_interval);
-    uv_timer_start(&c->timer_reconnect, timer_expire, c->connect_interval * 1000, 0);
 }
 
 static void
@@ -104,26 +106,10 @@ close_cb(uv_handle_t *handle) {
 }
 
 static void
-shutdown_cb(uv_shutdown_t *req, int status) {
-    if (status != 0) {
-        logger_log(LOG_ERR, "TCP shutdown (%d: %s)",
-            status, uv_strerror(status));
-    }
-    logger_log(LOG_INFO, "Close the TCP connection");
-    uv_close((uv_handle_t*) req->handle, close_cb);
-    free(req);
-}
-
-static void
 tcp_client_close(tcp_client_t *c) {
     ATOM_STORE(&c->status, DISCONNECTING);
-    logger_log(LOG_INFO, "Shutdown the TCP connection");
-    uv_shutdown_t *req = malloc(sizeof *req);
-    int rc = uv_shutdown(req, &c->inet_tcp.stream, shutdown_cb);
-    if (rc) {
-        req->handle = &c->inet_tcp.stream;
-        shutdown_cb(req, rc);
-    }
+    logger_log(LOG_INFO, "Close the TCP connection");
+    uv_close(&c->inet_tcp.handle, close_cb);
 }
 
 static void
@@ -199,6 +185,13 @@ keepalive(uv_timer_t *handle) {
 }
 
 static void
+close_cb_reconnect(uv_handle_t *handle) {
+    tcp_client_t *c = container_of(handle, tcp_client_t, inet_tcp.handle);
+    ATOM_STORE(&c->status, DISCONNECTED);
+    tcp_client_reconnect(c);
+}
+
+static void
 connect_cb(uv_connect_t *req, int status) {
     tcp_client_t *c = container_of(req, tcp_client_t, connect_req);
     if (status == 0) {
@@ -212,12 +205,10 @@ connect_cb(uv_connect_t *req, int status) {
         tcp_client_recv(c);
 
     } else {
-	    ATOM_STORE(&c->status, DISCONNECTED);
+        logger_log(LOG_ERR, "Failed to Connect to server (%d: %s)",
+                   status, uv_strerror(status));
         if (status != UV_ECANCELED) {
-            logger_log(LOG_ERR, "Failed to Connect to server (%d: %s)",
-                       status, uv_strerror(status));
-            uv_close(&c->inet_tcp.handle, NULL);
-            tcp_client_reconnect(c);
+            uv_close(&c->inet_tcp.handle, close_cb_reconnect);
         }
     }
 }
@@ -226,21 +217,29 @@ void
 tcp_client_connect(tcp_client_t *c) {
     int rc;
 
+    ATOM_STORE(&c->status, CONNECTING);
+
     uv_tcp_init(c->timer_reconnect.loop, &c->inet_tcp.tcp);
 
     c->inet_tcp_fd = create_socket(SOCK_STREAM, 0);
     if (c->inet_tcp_fd < 0) {
         logger_log(LOG_ERR, "Create socket - %s", strerror(errno));
-        return;
+        goto fail;
     }
     if (tcp_opts(c->inet_tcp_fd) != 0) {
         logger_log(LOG_ERR, "Set tcp opts - %s", strerror(errno));
         (void) close(c->inet_tcp_fd);
-        return;
+        goto fail;
     }
     if ((rc = uv_tcp_open(&c->inet_tcp.tcp, c->inet_tcp_fd))) {
         logger_log(LOG_ERR, "TCP open - %s", uv_strerror(rc));
-        return;
+        goto fail;
+    }
+    if (c->keepalive_interval) {
+        if ((rc = uv_tcp_keepalive(&c->inet_tcp.tcp, 1, c->keepalive_interval * 1000))) {
+            logger_log(LOG_ERR, "TCP keepalive - %s", uv_strerror(rc));
+            goto fail;
+        }
     }
 
 #ifdef ANDROID
@@ -255,12 +254,15 @@ tcp_client_connect(tcp_client_t *c) {
 
     rc = uv_tcp_connect(&c->connect_req, &c->inet_tcp.tcp, c->server_addr, connect_cb);
     if (rc) {
-        logger_log(LOG_ERR, "Connect to server error (%d: %s)",
-                   rc, uv_strerror(rc));
+        logger_log(LOG_ERR, "Connect to server error (%d: %s)", rc, uv_strerror(rc));
         uv_close(&c->inet_tcp.handle, NULL);
-    } else {
-        ATOM_STORE(&c->status, CONNECTING);
+        goto fail;
     }
+
+    return;
+fail:
+    ATOM_STORE(&c->status, DISCONNECTED);
+    return;
 }
 
 int

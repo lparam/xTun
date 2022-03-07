@@ -78,12 +78,20 @@ client_free(client_t *c) {
 
 static void
 client_close_cb(uv_handle_t *handle) {
-    client_t *client = container_of(handle, client_t, handle);
-    client_free(client);
+    client_t *c = container_of(handle, client_t, handle);
+    char remote[INET_ADDRSTRLEN + 1];
+    int port = ip_name(&c->addr, remote, sizeof(remote));
+    logger_log(LOG_INFO, "TCP client is closed: %"PRIu64" - %s:%d",
+               c->cid, remote, port);
+    client_free(c);
 }
 
 static void
 client_close(client_t *c) {
+    char remote[INET_ADDRSTRLEN + 1];
+    int port = ip_name(&c->addr, remote, sizeof(remote));
+    logger_log(LOG_INFO, "Close the TCP client: %"PRIu64" - %s:%d",
+               c->cid, remote, port);
     if (c->peer) {
         c->peer->data = NULL;
         c->peer = NULL;
@@ -179,6 +187,11 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
             } else {
                 if (peer->data) {
                     client_t *old = peer->data;
+                    char saddr[24] = {0}, daddr[24] = {0};
+                    parse_addr(iphdr, saddr, daddr);
+                    port = ip_name(&old->addr, remote, sizeof(remote));
+                    logger_log(LOG_WARNING, "Kick the TCP client: %"PRIu64" - %s:%d (%s)",
+                               old->cid, remote, port, saddr);
                     client_close(old);
                 }
             }

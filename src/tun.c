@@ -63,7 +63,7 @@ dispatch(buffer_t *tunbuf, tundev_ctx_t *ctx) {
         return 1;
     }
 
-    if (multicast && IN_MULTICAST(ntohl(iphdr->daddr))) {
+    if (IN_MULTICAST(ntohl(iphdr->daddr)) && !multicast) {
         parse_addr(iphdr, saddr, daddr);
         logger_log(LOG_DEBUG, "Discard Multicast %s -> %s", saddr, daddr);
         return 1;

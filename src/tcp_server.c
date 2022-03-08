@@ -167,7 +167,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         in_addr_t client_network = iphdr->saddr & htonl(ctx->tun->netmask);
         if (client_network != ctx->tun->network) {
             char *pa = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
-            logger_log(LOG_ERR, "Invalid peer: %s", pa);
+            logger_log(LOG_ERR, "Invalid peer (%s)", pa);
             client_close(c);
             break;
         }
@@ -245,7 +245,7 @@ accept_cb(uv_stream_t *stream, int status) {
         client_info(client);
         client->handle.stream.data = ctx;
         int fd = client->handle.tcp.io_watcher.fd;
-        if (tcp_opts(fd) != 0) {
+        if (tcp_opts(fd, nf_mark) != 0) {
             logger_stderr("set tcp opts - %s", strerror(errno));
         }
         uv_read_start(&client->handle.stream, alloc_cb, recv_cb);

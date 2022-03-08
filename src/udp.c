@@ -170,7 +170,7 @@ udp_start(udp_t *udp, uv_loop_t *loop) {
         logger_stderr("create socket error: %s", strerror(errno));
         exit(1);
     }
-    socket_mark(udp->inet_udp_fd);
+    socket_mark(udp->inet_udp_fd, nf_mark);
     if ((rc = uv_udp_open(&udp->inet_udp, udp->inet_udp_fd))) {
         logger_log(LOG_ERR, "UDP open error: %s", uv_strerror(rc));
         exit(1);

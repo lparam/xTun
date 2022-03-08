@@ -226,7 +226,7 @@ tcp_client_connect(tcp_client_t *c) {
         logger_log(LOG_ERR, "Create socket - %s", strerror(errno));
         goto fail;
     }
-    if (tcp_opts(c->inet_tcp_fd) != 0) {
+    if (tcp_opts(c->inet_tcp_fd, nf_mark) != 0) {
         logger_log(LOG_ERR, "Set tcp opts - %s", strerror(errno));
         (void) close(c->inet_tcp_fd);
         goto fail;
@@ -255,8 +255,8 @@ tcp_client_connect(tcp_client_t *c) {
     rc = uv_tcp_connect(&c->connect_req, &c->inet_tcp.tcp, c->server_addr, connect_cb);
     if (rc) {
         logger_log(LOG_ERR, "Connect to server error (%d: %s)", rc, uv_strerror(rc));
-        uv_close(&c->inet_tcp.handle, NULL);
-        goto fail;
+        // set status to RECONNECTING in close_cb_reconnect
+        uv_close(&c->inet_tcp.handle, close_cb_reconnect);
     }
 
     return;

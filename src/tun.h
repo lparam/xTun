@@ -66,6 +66,7 @@ int debug;
 int verbose;
 int protocol;
 int multicast;
+uint32_t nf_mark;
 uint8_t mode;
 
 #ifdef ANDROID

@@ -33,6 +33,7 @@ int signal_process(char *signal, const char *pidfile);
 
 enum {
     GETOPT_MTU = 128,
+    GETOPT_MARK,
     GETOPT_MULTICAST,
     GETOPT_KEEPALIVE,
     GETOPT_PID,
@@ -53,6 +54,7 @@ static const struct option _lopts[] = {
     { "",           required_argument,   NULL, 'P' },
     { "tcp",        no_argument,         NULL, 't' },
     { "mtu",        required_argument,   NULL,  GETOPT_MTU },
+    { "mark",       required_argument,   NULL,  GETOPT_MARK },
     { "multicast",  no_argument,         NULL,  GETOPT_MULTICAST },
     { "keepalive",  required_argument,   NULL,  GETOPT_KEEPALIVE },
     { "pid",        required_argument,   NULL,  GETOPT_PID },
@@ -84,6 +86,7 @@ print_usage(const char *prog) {
          "  [-t --tcp]\t\t use TCP rather than UDP (only available on client mode)\n"
          "  [--pid <pid>]\t\t PID file of daemon (default: /var/run/xTun.pid)\n"
          "  [--mtu <mtu>]\t\t MTU size (default: 1426)\n"
+         "  [--mark <mark>]\t netfilter mark (default: 0x3dd5)\n"
          "  [--multicast] \t enable multicast\n"
          "  [--keepalive <second>] keepalive delay (default: 0)\n"
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
@@ -176,6 +179,9 @@ parse_opts(int argc, char *argv[]) {
                 mtu = MTU;
             }
             break;
+        case GETOPT_MARK:
+            nf_mark = strtoul(optarg, NULL, 16);
+            break;
         case GETOPT_MULTICAST:
             multicast = 1;
             break;
@@ -243,6 +249,7 @@ main(int argc, char *argv[]) {
     }
 
     protocol = protocol ? protocol : xTUN_UDP;
+    nf_mark = nf_mark ? nf_mark : SOCKET_MARK;
 
     if (daemon_mode) {
         if (daemonize()) {

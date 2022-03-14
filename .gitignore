@@ -46,4 +46,5 @@ ipkg-*
 /core
 /xTun
 /xTun-android-armv7-a
+/xTun-android-armv8-a
 /xTun-android-i686

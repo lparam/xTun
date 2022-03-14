@@ -91,6 +91,7 @@ endif
 LDFLAGS = -Wl,--gc-sections
 
 ifdef ANDROID
+CFLAGS += -fPIC
 LDFLAGS += -fPIC
 LIBUV_FLAGS = --enable-shared=false
 LIBSODIUM_FLAGS = --disable-shared --disable-asm --disable-pie

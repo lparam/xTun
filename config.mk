@@ -18,17 +18,43 @@ endif
 #
 # Include the make variables (CC, etc...)
 #
-AS	= $(CROSS_COMPILE)as
-CC	= $(CROSS_COMPILE)gcc
-LD	= $(CROSS_COMPILE)ld
+ifndef AS
+AS = $(CROSS_COMPILE)as
+endif
+
+ifndef CC
+CC = $(CROSS_COMPILE)gcc
+endif
+
+ifndef LD
+LD = $(CROSS_COMPILE)ld
+endif
+
 CPP	= $(CC) -E
-AR	= $(CROSS_COMPILE)ar
+
+ifndef AR
+AR = $(CROSS_COMPILE)ar
+endif
+
+ifndef NM
 NM	= $(CROSS_COMPILE)nm
-LDR	= $(CROSS_COMPILE)ldr
-STRIP	= $(CROSS_COMPILE)strip
+endif
+
+ifndef STRIP
+STRIP = $(CROSS_COMPILE)strip
+endif
+
+ifndef OBJCOPY
 OBJCOPY = $(CROSS_COMPILE)objcopy
+endif
+
+ifndef OBJDUMP
 OBJDUMP = $(CROSS_COMPILE)objdump
-RANLIB	= $(CROSS_COMPILE)ranlib
+endif
+
+ifndef RANLIB
+RANLIB = $(CROSS_COMPILE)ranlib
+endif
 
 #########################################################################
 

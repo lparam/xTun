@@ -156,7 +156,7 @@ resolve_addr(const char *buf, int port, struct sockaddr *addr) {
             }
 
             if (rp == NULL) {
-                logger_stderr("resolve address failed: %s", buf);
+                logger_stderr("Resolve address failed: %s", buf);
                 rc = 1;
             }
 

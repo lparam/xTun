@@ -58,6 +58,12 @@ typedef struct tundev {
     struct tundev_ctx      contexts[0];
 } tundev_t;
 
+typedef struct peer_addr {
+    char node[128];
+    int port;
+    struct sockaddr addr;
+} peer_addr_t;
+
 uv_rwlock_t clients_rwlock;
 rwlock_t peers_rwlock;
 peer_t *peers[HASHSIZE];
@@ -70,8 +76,8 @@ uint32_t nf_mark;
 uint8_t mode;
 
 #ifdef ANDROID
-    int dns_global;
-    struct sockaddr dns_server;
+int dns_global;
+struct sockaddr dns_server;
 #endif
 
 int tun_write(int tunfd, uint8_t *buf, ssize_t len);

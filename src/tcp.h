@@ -9,8 +9,9 @@
 typedef struct tcp_client tcp_client_t;
 typedef struct tcp_server tcp_server_t;
 typedef struct tundev_ctx tundev_ctx_t;
+typedef struct peer_addr peer_addr_t;
 
-tcp_client_t * tcp_client_new(tundev_ctx_t *ctx, struct sockaddr *addr);
+tcp_client_t * tcp_client_new(tundev_ctx_t *ctx, peer_addr_t *addr);
 void tcp_client_free(tcp_client_t *c);
 int tcp_client_start(tcp_client_t *c, uv_loop_t *loop);
 void tcp_client_stop(tcp_client_t *c);

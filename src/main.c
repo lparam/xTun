@@ -263,8 +263,11 @@ main(int argc, char *argv[]) {
 
     init();
 
-    struct sockaddr addr;
-    int rc = resolve_addr(addrbuf, port, &addr);
+    peer_addr_t addr;
+    strncpy(addr.node, addrbuf, sizeof(addr.node) - 1);
+    addr.port = port;
+
+    int rc = resolve_addr(addrbuf, port, &addr.addr);
     if (rc) {
         return 1;
     }

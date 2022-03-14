@@ -511,11 +511,13 @@ signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data) {
 
 int
 #ifndef ANDROID
-tun_run(tundev_t *tun, struct sockaddr addr) {
+tun_run(tundev_t *tun, peer_addr_t addr) {
 #else
 tun_run(tundev_t *tun, const char *server, int port) {
-    struct sockaddr addr;
-    if (resolve_addr(server, port, &addr)) {
+    peer_addr_t addr;
+    strncpy(addr.node, server, sizeof(addr.node)-1);
+    addr.port = port;
+    if (protocol == xTUN_UDP && resolve_addr(server, port, &addr.addr)) {
         logger_stderr("Invalid server address");
         return 1;
     }
@@ -533,7 +535,7 @@ tun_run(tundev_t *tun, const char *server, int port) {
         for (i = 0; i < tun->queues; i++) {
             uv_thread_t thread_id;
             tundev_ctx_t *ctx = &tun->contexts[i];
-            ctx->udp = udp_new(ctx, &addr);
+            ctx->udp = udp_new(ctx, &addr.addr);
             uv_sem_init(&ctx->semaphore, 0);
             uv_thread_create(&thread_id, queue_start, ctx);
         }
@@ -552,8 +554,8 @@ tun_run(tundev_t *tun, const char *server, int port) {
         tundev_ctx_t *ctx = tun->contexts;
 
         if (mode == xTUN_SERVER) {
-            ctx->udp = udp_new(ctx, &addr);
-            ctx->tcp_server = tcp_server_new(ctx, &addr);
+            ctx->udp = udp_new(ctx, &addr.addr);
+            ctx->tcp_server = tcp_server_new(ctx, &addr.addr);
             udp_start(ctx->udp, loop);
             tcp_server_start(ctx->tcp_server, loop);
 
@@ -562,7 +564,7 @@ tun_run(tundev_t *tun, const char *server, int port) {
                 ctx->tcp_client = tcp_client_new(ctx, &addr);
                 tcp_client_start(ctx->tcp_client, loop);
             } else {
-                ctx->udp = udp_new(ctx, &addr);
+                ctx->udp = udp_new(ctx, &addr.addr);
                 udp_start(ctx->udp, loop);
             }
         }

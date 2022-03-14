@@ -30,7 +30,7 @@ typedef struct tcp_client {
     int connect_interval;
     int keepalive_interval;
     int inet_tcp_fd;
-    struct sockaddr *server_addr;
+    peer_addr_t *peer_addr;
     union {
         uv_tcp_t tcp;
         uv_handle_t handle;
@@ -47,7 +47,7 @@ typedef struct tcp_client {
 } tcp_client_t;
 
 tcp_client_t *
-tcp_client_new(tundev_ctx_t *ctx, struct sockaddr *addr) {
+tcp_client_new(tundev_ctx_t *ctx, peer_addr_t *addr) {
     tcp_client_t *c = malloc(sizeof *c);
     memset(c, 0, sizeof *c);
     buffer_alloc(&c->recv_buffer, ctx->tun->mtu + CRYPTO_MAX_OVERHEAD);
@@ -56,7 +56,7 @@ tcp_client_new(tundev_ctx_t *ctx, struct sockaddr *addr) {
     c->cipher_d = cipher_new();
     c->connect_interval = DEFAULT_INTERVAL;
     c->tun_ctx = ctx;
-    c->server_addr = addr;
+    c->peer_addr = addr;
     c->keepalive_interval = ctx->tun->keepalive_interval;
     ATOM_INIT(&c->status, DISCONNECTED);
     return c;
@@ -196,9 +196,8 @@ connect_cb(uv_connect_t *req, int status) {
     tcp_client_t *c = container_of(req, tcp_client_t, connect_req);
     if (status == 0) {
         char remote[INET_ADDRSTRLEN + 1];
-        int port = ip_name(c->server_addr, remote, sizeof(remote));
+        int port = ip_name(&c->peer_addr->addr, remote, sizeof(remote));
         logger_log(LOG_INFO, "Successfully connected to server %s:%d", remote, port);
-
         ATOM_STORE(&c->status, CONNECTED);
         uv_timer_stop(&c->timer_reconnect);
         tcp_client_reset(c);
@@ -248,11 +247,11 @@ tcp_client_connect(tcp_client_t *c) {
                rc ? "successful" : "failed");
 #endif
 
-    char remote[INET_ADDRSTRLEN + 1];
-    int port = ip_name(c->server_addr, remote, sizeof(remote));
-    logger_log(LOG_INFO, "Connect to server %s:%d ...", remote, port);
-
-    rc = uv_tcp_connect(&c->connect_req, &c->inet_tcp.tcp, c->server_addr, connect_cb);
+    logger_log(LOG_INFO, "Connect to server %s:%d ...", c->peer_addr->node, c->peer_addr->port);
+    if (resolve_addr(c->peer_addr->node, c->peer_addr->port, &c->peer_addr->addr)) {
+        goto fail;
+    }
+    rc = uv_tcp_connect(&c->connect_req, &c->inet_tcp.tcp, &c->peer_addr->addr, connect_cb);
     if (rc) {
         logger_log(LOG_ERR, "Connect to server error (%d: %s)", rc, uv_strerror(rc));
         // set status to RECONNECTING in close_cb_reconnect

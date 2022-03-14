@@ -24,6 +24,22 @@
 
 #define DNS_PORT 53
 
+uv_rwlock_t clients_rwlock;
+rwlock_t peers_rwlock;
+peer_t *peers[HASHSIZE];
+
+int debug;
+int verbose;
+int protocol;
+int multicast;
+uint32_t nf_mark;
+uint8_t mode;
+
+#ifdef ANDROID
+int dns_global;
+struct sockaddr dns_server;
+#endif
+
 struct signal_ctx {
     int            signum;
     uv_signal_t    sig;

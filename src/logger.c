@@ -70,7 +70,7 @@ logger_log(uint32_t level, const char *msg, ...) {
         } else {
             level = ANDROID_LOG_INFO;
         }
-        __android_log_print(level, "xTun", tmp);
+        __android_log_print(level, "xTun", "%s", tmp);
 #else
         time_t curtime = time(NULL);
         struct tm *loctime = localtime(&curtime);

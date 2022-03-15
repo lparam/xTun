@@ -3,11 +3,11 @@
 
 #include "uv.h"
 #include "buffer.h"
+#include "tun.h"
 
 typedef struct udp udp_t;
-typedef struct tundev_ctx tundev_ctx_t;
 
-udp_t *udp_new(tundev_ctx_t *tun, struct sockaddr *addr);
+udp_t *udp_new(tundev_ctx_t *tun, struct sockaddr *addr, int mtu);
 void udp_free();
 int udp_start(udp_t *udp, uv_loop_t *loop);
 void udp_stop(udp_t *udp);

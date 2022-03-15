@@ -1,6 +1,6 @@
 MAJOR = 0
 MINOR = 6
-PATCH = 4
+PATCH = 5
 NAME = xTun
 
 ifdef O
@@ -91,6 +91,7 @@ endif
 LDFLAGS = -Wl,--gc-sections
 
 ifdef ANDROID
+CFLAGS += -fPIC
 LDFLAGS += -fPIC
 LIBUV_FLAGS = --enable-shared=false
 LIBSODIUM_FLAGS = --disable-shared --disable-asm --disable-pie

@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <netinet/in.h>
 
 #include "crypto.h"
 
@@ -18,11 +19,7 @@ typedef struct packet {
     uint8_t *buf;
 } packet_t;
 
-typedef struct tundev tundev_t;
-
 int packet_parse(packet_t *packet, buffer_t *buf, cipher_ctx_t *ctx);
 void packet_reset(packet_t *packet);
-int packet_is_keepalive(buffer_t *buf);
-void packet_construct_keepalive(buffer_t *buf, tundev_t *tun);
 
 #endif // for #ifndef PACKET_H

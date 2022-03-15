@@ -1,0 +1,49 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006-2014 OpenWrt.org
+
+START=72
+STOP=30
+FIREWALL_RELOAD=0
+
+CIDR=10.0.2.1/24
+PORT=1082
+PASSWORD=password
+
+COMMENT='-m comment --comment xTun'
+
+check_running(){
+    PID=$(ps | grep -v grep | grep -v '/etc/init.d/xTun' | grep -i xTun | awk '{print $1}')
+    if [ -n "$PID" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+start() {
+    check_running
+    if [ $? -eq 0 ]; then
+        echo "xTun (pid $PID) is running..."
+    else
+        xTun -I $CIDR -k $PASSWORD -s -p $PORT
+        net_start
+    fi
+}
+
+stop() {
+    net_stop
+    xTun --signal stop
+}
+
+shutdown() {
+    net_stop
+    xTun --signal quit
+}
+
+net_start() {
+    iptables -t filter -I FORWARD -s $CIDR -m conntrack --ctstate NEW,RELATED,ESTABLISHED -j ACCEPT $COMMENT
+}
+
+net_stop() {
+    iptables -t filter -D FORWARD -s $CIDR -m conntrack --ctstate NEW,RELATED,ESTABLISHED -j ACCEPT $COMMENT 2>/dev/null
+}

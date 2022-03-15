@@ -13,7 +13,6 @@
 #include "android.h"
 #include "checksum.h"
 #include "dns.h"
-#include "tun.h"
 
 
 #define DNS_ANSWER_SIZE 1024

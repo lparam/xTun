@@ -49,22 +49,3 @@ packet_reset(packet_t *packet) {
     packet->buf = NULL;
     packet->size = 0;
 }
-
-int
-packet_is_keepalive(buffer_t *buf) {
-    return (buf->len == sizeof(struct iphdr) + strlen(xTUN_KEEPALIVE)) &&
-            !strncmp((char *)(buf->data + sizeof(struct iphdr)),
-                     xTUN_KEEPALIVE, strlen(xTUN_KEEPALIVE));
-}
-
-void
-packet_construct_keepalive(buffer_t *buf, tundev_t *tun) {
-    size_t len = sizeof(struct iphdr) + strlen(xTUN_KEEPALIVE);
-    buffer_alloc(buf, len + CRYPTO_MAX_OVERHEAD);
-    memset(buf->data, 0, len);
-    buf->len = len;
-    struct iphdr *iphdr = (struct iphdr *)buf->data;
-    iphdr->saddr = tun->addr;
-    iphdr->daddr = tun->network;
-    memcpy(buf->data + sizeof *iphdr, xTUN_KEEPALIVE, strlen(xTUN_KEEPALIVE));
-}

@@ -11,7 +11,7 @@
 #define BUFFERBLOAT_CONTROL 1
 #define NOTSENT_LOWAT (128 * 1024)
 #define TCP_TIMEOUT (60 * 1000)
-#define SOCKET_MARK 20909U
+#define SOCKET_MARK 0x3DD5
 
 #define container_of(ptr, type, member) ((type*)(((char*)(ptr)) - offsetof(type, member)))
 #define max(a, b) (((a) > (b)) ? (a) : (b))
@@ -23,8 +23,8 @@ void dump_hex(const void *data, uint32_t len, char *title);
 int resolve_addr(const char *buf, int port, struct sockaddr *addr);
 int ip_name(const struct sockaddr *ip, char *name, size_t size);
 int create_socket(int type, int reuse);
-int tcp_opts(int fd);
-int socket_mark(int fd);
+int tcp_opts(int fd, uint32_t mark);
+int socket_mark(int fd, uint32_t mark);
 pid_t gettid();
 int read_size(uint8_t *buffer);
 void write_size(uint8_t *buffer, int len);

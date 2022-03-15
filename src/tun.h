@@ -1,15 +1,13 @@
 #ifndef TUN_H
 #define TUN_H
 
+#include <netinet/ip.h>
 #include <linux/if.h>
 
 #include "uv.h"
 
 #include "rwlock.h"
-#include "packet.h"
 #include "peer.h"
-#include "udp.h"
-#include "tcp.h"
 
 
 /* MTU of VPN tunnel device. Use the following formula to calculate:
@@ -30,48 +28,32 @@
 #define xTUN_TCP        0x01
 #define xTUN_UDP        0x02
 
-#define xTUN_KEEPALIVE "xTun-keepalive"
+typedef struct tundev tundev_t;
+typedef struct tundev_ctx tundev_ctx_t;
 
-typedef struct tundev_ctx {
-    uv_poll_t        watcher;
-    uv_sem_t         semaphore;
-    uv_async_t       async_handle;
+typedef struct peer_addr {
+    char node[128];
+    int port;
+    struct sockaddr addr;
+} peer_addr_t;
 
-    udp_t           *udp;
-    tcp_server_t    *tcp_server;
-    tcp_client_t    *tcp_client;
+extern uv_rwlock_t clients_rwlock;
+extern rwlock_t peers_rwlock;
+extern peer_t *peers[HASHSIZE];
 
-    int              tunfd;
-    struct tundev   *tun;
-} tundev_ctx_t;
-
-typedef struct tundev {
-    char                   iface[IFNAMSIZ];
-    char                   ifconf[128];
-    int                    mtu;
-    int                    keepalive_interval;
-    in_addr_t              addr;
-    in_addr_t              network;
-    in_addr_t              netmask;
-
-    uint32_t               queues;
-    struct tundev_ctx      contexts[0];
-} tundev_t;
-
-uv_rwlock_t clients_rwlock;
-rwlock_t peers_rwlock;
-peer_t *peers[HASHSIZE];
-
-int debug;
-int verbose;
-int protocol;
-uint8_t mode;
+extern int debug;
+extern int verbose;
+extern int protocol;
+extern int multicast;
+extern uint32_t nf_mark;
+extern uint8_t mode;
 
 #ifdef ANDROID
-    int dns_global;
-    struct sockaddr dns_server;
+extern int dns_global;
+extern struct sockaddr dns_server;
 #endif
 
-int tun_write(int tunfd, uint8_t *buf, ssize_t len);
+int tun_write(tundev_ctx_t *ctx, uint8_t *buf, ssize_t len);
+int tun_network_check(struct tundev_ctx *ctx, struct iphdr *iphdr);
 
 #endif // for #ifndef TUN_H

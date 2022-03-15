@@ -2,20 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
 #include <ctype.h>
-#include <assert.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <sys/types.h>
 #include <sys/syscall.h>
-#include <linux/if.h>
-#include <linux/if_tun.h>
-#include <linux/route.h>
-#include <netinet/ip.h>
 
 #include "uv.h"
+
 #include "logger.h"
 #include "util.h"
 
@@ -156,7 +147,7 @@ resolve_addr(const char *buf, int port, struct sockaddr *addr) {
             }
 
             if (rp == NULL) {
-                logger_stderr("resolve address failed: %s", buf);
+                logger_stderr("Resolve address failed: %s", buf);
                 rc = 1;
             }
 
@@ -212,14 +203,14 @@ create_socket(int type, int reuse) {
     return sock;
 }
 
-int tcp_opts(int fd) {
+int tcp_opts(int fd, uint32_t mark) {
     int on = 1;
 
-    (void) setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (char *) &on, sizeof on);
+    (void) setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof on);
 #ifdef TCP_QUICKACK
-    (void) setsockopt(fd, IPPROTO_TCP, TCP_QUICKACK, (char *) &on, sizeof on);
+    (void) setsockopt(fd, IPPROTO_TCP, TCP_QUICKACK, &on, sizeof on);
 #else
-    (void) setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *) &on, sizeof on);
+    (void) setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof on);
 #endif
 #ifdef TCP_CONGESTION
     (void) setsockopt(fd, IPPROTO_TCP, TCP_CONGESTION, OUTER_CONGESTION_CONTROL_ALG,
@@ -227,23 +218,24 @@ int tcp_opts(int fd) {
 #endif
 #if BUFFERBLOAT_CONTROL && defined(TCP_NOTSENT_LOWAT)
     (void) setsockopt(fd, IPPROTO_TCP, TCP_NOTSENT_LOWAT,
-                      (char *) (uint32_t[]){ NOTSENT_LOWAT }, sizeof(uint32_t));
+                      (uint32_t[]){ NOTSENT_LOWAT }, sizeof(uint32_t));
 #endif
 #ifdef TCP_USER_TIMEOUT
-    (void) setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, (char *) (uint32_t[]){ TCP_TIMEOUT },
+    (void) setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, (uint32_t[]){ TCP_TIMEOUT },
                       sizeof(uint32_t));
 #endif
-#ifdef SO_MARK
-    (void) setsockopt(fd, SOL_SOCKET, SO_MARK, (char *) (uint32_t[]){ SOCKET_MARK },
-                      sizeof(uint32_t));
-#endif
+
+    socket_mark(fd, mark);
+
     return 0;
 }
 
-int socket_mark(int fd) {
+int socket_mark(int fd, uint32_t mark) {
 #ifdef SO_MARK
-    (void) setsockopt(fd, SOL_SOCKET, SO_MARK, (char *) (uint32_t[]){ SOCKET_MARK },
-                      sizeof(uint32_t));
+    if (setsockopt(fd, SOL_SOCKET, SO_MARK, &mark, sizeof(mark))) {
+        logger_stderr("setsockopt SO_MARK (%s)", strerror(errno));
+        return 1;
+    }
 #endif
     return 0;
 }

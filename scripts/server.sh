@@ -1,6 +1,5 @@
 #!/bin/sh
 
-IFACE=tun0
 CIDR=10.0.1.1/24
 PORT=1082
 PASSWORD=password
@@ -25,7 +24,7 @@ check_running(){
 }
 
 start() {
-    $DAEMON -i $IFACE -I $CIDR -k $PASSWORD -s -p $PORT
+    $DAEMON -I $CIDR -k $PASSWORD -s -p $PORT
     net_start
 }
 

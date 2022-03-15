@@ -18,10 +18,9 @@
 
 static int mtu = MTU;
 static int port = 1082;
-static int keepalive_interval = 0;
 static int daemon_mode = 1;
 static uint32_t parallel = 1;
-static int log_level = LOG_DEBUG;
+static int log_level = LOG_INFO;
 static char *iface = "";
 static char *ifconf;
 static char *addrbuf;
@@ -33,7 +32,8 @@ int signal_process(char *signal, const char *pidfile);
 
 enum {
     GETOPT_MTU = 128,
-    GETOPT_KEEPALIVE,
+    GETOPT_MARK,
+    GETOPT_MULTICAST,
     GETOPT_PID,
     GETOPT_SIGNAL,
     GETOPT_LEVEL,
@@ -52,7 +52,8 @@ static const struct option _lopts[] = {
     { "",           required_argument,   NULL, 'P' },
     { "tcp",        no_argument,         NULL, 't' },
     { "mtu",        required_argument,   NULL,  GETOPT_MTU },
-    { "keepalive",  required_argument,   NULL,  GETOPT_KEEPALIVE },
+    { "mark",       required_argument,   NULL,  GETOPT_MARK },
+    { "multicast",  no_argument,         NULL,  GETOPT_MULTICAST },
     { "pid",        required_argument,   NULL,  GETOPT_PID },
     { "signal",     required_argument,   NULL,  GETOPT_SIGNAL },
     { "level",      required_argument,   NULL,  GETOPT_LEVEL },
@@ -82,7 +83,8 @@ print_usage(const char *prog) {
          "  [-t --tcp]\t\t use TCP rather than UDP (only available on client mode)\n"
          "  [--pid <pid>]\t\t PID file of daemon (default: /var/run/xTun.pid)\n"
          "  [--mtu <mtu>]\t\t MTU size (default: 1426)\n"
-         "  [--keepalive <second>] keepalive delay (default: 0)\n"
+         "  [--mark <mark>]\t netfilter mark (default: 0x3dd5)\n"
+         "  [--multicast] \t enable multicast\n"
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
          "  [--level <level>] \t log level: debug, info, warn, error\n"
          "  [--debug] \t\t debug mode\n"
@@ -173,8 +175,11 @@ parse_opts(int argc, char *argv[]) {
                 mtu = MTU;
             }
             break;
-        case GETOPT_KEEPALIVE:
-            keepalive_interval = strtol(optarg, NULL, 10);
+        case GETOPT_MARK:
+            nf_mark = strtoul(optarg, NULL, 16);
+            break;
+        case GETOPT_MULTICAST:
+            multicast = 1;
             break;
         case GETOPT_PID:
             pidfile = optarg;
@@ -237,6 +242,7 @@ main(int argc, char *argv[]) {
     }
 
     protocol = protocol ? protocol : xTUN_UDP;
+    nf_mark = nf_mark ? nf_mark : SOCKET_MARK;
 
     if (daemon_mode) {
         if (daemonize()) {
@@ -250,10 +256,12 @@ main(int argc, char *argv[]) {
 
     init();
 
-    struct sockaddr addr;
-    int rc = resolve_addr(addrbuf, port, &addr);
+    peer_addr_t addr;
+    strncpy(addr.node, addrbuf, sizeof(addr.node) - 1);
+    addr.port = port;
+
+    int rc = resolve_addr(addrbuf, port, &addr.addr);
     if (rc) {
-        logger_stderr("Invalid address");
         return 1;
     }
 
@@ -263,9 +271,6 @@ main(int argc, char *argv[]) {
     }
 
     tun_config(tun, ifconf, mtu);
-    if (keepalive_interval) {
-        tun_keepalive(tun, 1, keepalive_interval);
-    }
     tun_run(tun, addr);
 
     tun_free(tun);

@@ -25,6 +25,9 @@ endif
 ifndef CC
 CC = $(CROSS_COMPILE)gcc
 endif
+ifeq ($(CC), cc)
+CC = $(CROSS_COMPILE)gcc
+endif
 
 ifndef LD
 LD = $(CROSS_COMPILE)ld

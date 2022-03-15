@@ -31,7 +31,7 @@ make package/xTun/openwrt/compile
 
 ```bash
 $ xTun -h
-xTun Version: v0.6.3-6d59478 Maintained by lparam
+xTun Version: v0.6.5-b2a68f3 Maintained by lparam
 Usage:
   xTun [options]
 Options:
@@ -43,16 +43,18 @@ Options:
   [-i <iface>]           interface name (e.g. tun0)
   [-b --bind <host>]     bind to a specific interface (only available on server mode, default: 0.0.0.0)
   [-P <parallel>]        number of parallel tun queues (only available on server mode & UDP)
+  [-t --tcp]             use TCP rather than UDP (only available on client mode)
   [--pid <pid>]          PID file of daemon (default: /var/run/xTun.pid)
   [--mtu <mtu>]          MTU size (default: 1426)
-  [--keepalive <second>] keepalive delay (default: 0)
+  [--mark <mark>]        netfilter mark (default: 0x3dd5)
+  [--multicast]          enable multicast
   [--signal <signal>]    send signal to xTun: quit, stop
-  [-t --tcp]             use TCP rather than UDP (only available on client mode)
-  [-n]                   non daemon mode
+  [--level <level>]      log level: debug, info, warn, error
   [--debug]              debug mode
+  [-n]                   non daemon mode
+  [-V]                   verbose mode
   [-h, --help]           this help
   [-v, --version]        show version
-  [-V]                   verbose mode
 ```
 
 ### scripts

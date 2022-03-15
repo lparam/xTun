@@ -1,3 +1,10 @@
+v0.6.5 (2022-3-15)
+-----------
+* Feature: netfilter mark
+* Fix: close tcp stream
+* Change: remove keepalive
+
+
 v0.6.4 (2021-12-25)
 -----------
 * Feature: log level

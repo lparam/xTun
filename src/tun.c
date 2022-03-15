@@ -404,7 +404,6 @@ tun_close(uv_async_t *handle) {
     uv_close((uv_handle_t *) &ctx->async_handle, NULL);
     close_network(ctx);
     uv_poll_stop(&ctx->watcher);
-    close_tunfd(ctx->tunfd);
 
     if (!dns_global) {
         clear_dns_query();

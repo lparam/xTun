@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=xTun
-PKG_VERSION:=0.6.4
+PKG_VERSION:=0.6.5
 PKG_RELEASE=
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz

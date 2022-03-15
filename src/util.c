@@ -2,20 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
 #include <ctype.h>
-#include <assert.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <sys/types.h>
 #include <sys/syscall.h>
-#include <linux/if.h>
-#include <linux/if_tun.h>
-#include <linux/route.h>
-#include <netinet/ip.h>
 
 #include "uv.h"
+
 #include "logger.h"
 #include "util.h"
 

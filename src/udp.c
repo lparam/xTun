@@ -11,35 +11,36 @@
 #include <netinet/ip.h>
 #include <netinet/udp.h>
 
-#include "util.h"
-#include "logger.h"
+#include "uv.h"
+
 #include "crypto.h"
+#include "logger.h"
 #include "tun.h"
+#include "util.h"
 #ifdef ANDROID
 #include "android.h"
 #endif
 
 
+extern int tun_network_check(struct tundev_ctx *ctx, struct iphdr *iphdr);
+
 typedef struct udp {
     struct sockaddr *addr;
-    int keepalive_interval;
     int inet_udp_fd;
     uv_udp_t inet_udp;
-    uv_timer_t timer_keepalive;
     buffer_t recv_buffer;
     cipher_ctx_t *cipher;
-    tundev_ctx_t *tun_ctx;
+    struct tundev_ctx *tun_ctx;
 } udp_t;
 
 udp_t *
-udp_new(tundev_ctx_t *ctx, struct sockaddr *addr) {
+udp_new(struct tundev_ctx *ctx, struct sockaddr *addr, int mtu) {
     udp_t *udp = malloc(sizeof *udp);
     memset(udp, 0, sizeof *udp);
     udp->cipher = cipher_new();
-    buffer_alloc(&udp->recv_buffer, ctx->tun->mtu + CRYPTO_MAX_OVERHEAD);
+    buffer_alloc(&udp->recv_buffer, mtu + CRYPTO_MAX_OVERHEAD);
     udp->addr = addr;
     udp->tun_ctx = ctx;
-    udp->keepalive_interval = ctx->tun->keepalive_interval;
     return udp;
 }
 
@@ -90,9 +91,7 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
 
     if (mode == xTUN_SERVER) {
         struct iphdr *iphdr = (struct iphdr *) udp->recv_buffer.data;
-
-        in_addr_t client_network = iphdr->saddr & htonl(udp->tun_ctx->tun->netmask);
-        if (client_network != udp->tun_ctx->tun->network) {
+        if (tun_network_check(udp->tun_ctx, iphdr)) {
             char *pa = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
             return logger_log(LOG_ERR, "Invalid peer: %s", pa);
         }
@@ -114,13 +113,9 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
             }
         }
         peer->protocol = xTUN_UDP;
-
-        if (packet_is_keepalive(&udp->recv_buffer)) {
-            return;
-        }
     }
 
-    tun_write(udp->tun_ctx->tunfd, udp->recv_buffer.data, udp->recv_buffer.len);
+    tun_write(udp->tun_ctx, udp->recv_buffer.data, udp->recv_buffer.len);
 }
 
 static void
@@ -149,14 +144,6 @@ udp_send(udp_t *udp, buffer_t *buf, struct sockaddr *addr) {
         buffer_free(buf);
         free(write_req);
     }
-}
-
-static void
-keepalive(uv_timer_t *handle) {
-    udp_t *udp = container_of(handle, udp_t, timer_keepalive);
-    buffer_t buf;
-    packet_construct_keepalive(&buf, udp->tun_ctx->tun);
-    udp_send(udp, &buf, NULL);
 }
 
 int
@@ -189,13 +176,6 @@ udp_start(udp_t *udp, uv_loop_t *loop) {
             logger_stderr("UDP bind error: %s", uv_strerror(rc));
             exit(1);
         }
-
-    } else {
-        if (udp->keepalive_interval) {
-            uint64_t timeout = udp->keepalive_interval * 1000;
-            uv_timer_init(loop, &udp->timer_keepalive);
-            uv_timer_start(&udp->timer_keepalive, keepalive, timeout, timeout);
-        }
     }
 
     return uv_udp_recv_start(&udp->inet_udp, inet_alloc_cb, inet_recv_cb);
@@ -204,9 +184,4 @@ udp_start(udp_t *udp, uv_loop_t *loop) {
 void
 udp_stop(udp_t *udp) {
     uv_close((uv_handle_t *) &udp->inet_udp, NULL);
-    if (mode == xTUN_CLIENT) {
-        if (udp->keepalive_interval) {
-            uv_close((uv_handle_t *) &udp->timer_keepalive, NULL);
-        }
-    }
 }

@@ -8,9 +8,8 @@
 #include "logger.h"
 #include "packet.h"
 #include "rwlock.h"
-#include "util.h"
-#include "tun.h"
 #include "tcp.h"
+#include "util.h"
 #ifdef ANDROID
 #include "android.h"
 #endif
@@ -28,7 +27,6 @@
 typedef struct tcp_client {
     ATOM_INT status;
     int connect_interval;
-    int keepalive_interval;
     int inet_tcp_fd;
     peer_addr_t *peer_addr;
     union {
@@ -37,7 +35,6 @@ typedef struct tcp_client {
         uv_stream_t stream;
     } inet_tcp;
     uv_connect_t connect_req;
-    uv_timer_t timer_keepalive;
     uv_timer_t timer_reconnect;
     buffer_t recv_buffer;
     packet_t packet;
@@ -46,18 +43,18 @@ typedef struct tcp_client {
     tundev_ctx_t *tun_ctx;
 } tcp_client_t;
 
+
 tcp_client_t *
-tcp_client_new(tundev_ctx_t *ctx, peer_addr_t *addr) {
+tcp_client_new(tundev_ctx_t *ctx, peer_addr_t *addr, int mtu) {
     tcp_client_t *c = malloc(sizeof *c);
     memset(c, 0, sizeof *c);
-    buffer_alloc(&c->recv_buffer, ctx->tun->mtu + CRYPTO_MAX_OVERHEAD);
+    buffer_alloc(&c->recv_buffer, mtu + CRYPTO_MAX_OVERHEAD);
     packet_reset(&c->packet);
     c->cipher_e = cipher_new();
     c->cipher_d = cipher_new();
     c->connect_interval = DEFAULT_INTERVAL;
     c->tun_ctx = ctx;
     c->peer_addr = addr;
-    c->keepalive_interval = ctx->tun->keepalive_interval;
     ATOM_INIT(&c->status, DISCONNECTED);
     return c;
 }
@@ -151,7 +148,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
             break;
         }
 
-        tun_write(c->tun_ctx->tunfd, c->packet.buf, c->packet.size);
+        tun_write(c->tun_ctx, c->packet.buf, c->packet.size);
 
         int remain = c->recv_buffer.len - c->recv_buffer.off;
         if (remain > 0) {
@@ -167,21 +164,6 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 static void
 tcp_client_recv(tcp_client_t *c) {
     uv_read_start(&c->inet_tcp.stream, alloc_cb, recv_cb);
-}
-
-static void
-keepalive(uv_timer_t *handle) {
-    tcp_client_t *c = container_of(handle, tcp_client_t, timer_keepalive);
-    if (ATOM_LOAD(&c->status) != CONNECTED) {
-        if (ATOM_LOAD(&c->status) == DISCONNECTED) {
-            tcp_client_connect(c);
-        }
-
-    } else {
-        buffer_t buf;
-        packet_construct_keepalive(&buf, c->tun_ctx->tun);
-        tcp_send(&c->inet_tcp.stream, &buf, c->cipher_e);
-    }
 }
 
 static void
@@ -234,12 +216,6 @@ tcp_client_connect(tcp_client_t *c) {
         logger_log(LOG_ERR, "TCP open - %s", uv_strerror(rc));
         goto fail;
     }
-    if (c->keepalive_interval) {
-        if ((rc = uv_tcp_keepalive(&c->inet_tcp.tcp, 1, c->keepalive_interval * 1000))) {
-            logger_log(LOG_ERR, "TCP keepalive - %s", uv_strerror(rc));
-            goto fail;
-        }
-    }
 
 #ifdef ANDROID
     rc = protect_socket(c->inet_tcp_fd);
@@ -267,11 +243,6 @@ fail:
 int
 tcp_client_start(tcp_client_t *c, uv_loop_t *loop) {
     uv_timer_init(loop, &c->timer_reconnect);
-    if (c->keepalive_interval) {
-        uint64_t timeout = c->keepalive_interval * 1000;
-        uv_timer_init(loop, &c->timer_keepalive);
-        uv_timer_start(&c->timer_keepalive, keepalive, timeout, timeout);
-    }
     tcp_client_connect(c);
     return 0;
 }
@@ -282,9 +253,6 @@ tcp_client_stop(tcp_client_t *c) {
         uv_tcp_close_reset(&c->inet_tcp.tcp, NULL);
     }
     uv_close((uv_handle_t *) &c->timer_reconnect, NULL);
-    if (c->keepalive_interval) {
-        uv_close((uv_handle_t *) &c->timer_keepalive, NULL);
-    }
 }
 
 int

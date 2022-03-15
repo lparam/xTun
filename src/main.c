@@ -18,7 +18,6 @@
 
 static int mtu = MTU;
 static int port = 1082;
-static int keepalive_interval = 0;
 static int daemon_mode = 1;
 static uint32_t parallel = 1;
 static int log_level = LOG_INFO;
@@ -35,7 +34,6 @@ enum {
     GETOPT_MTU = 128,
     GETOPT_MARK,
     GETOPT_MULTICAST,
-    GETOPT_KEEPALIVE,
     GETOPT_PID,
     GETOPT_SIGNAL,
     GETOPT_LEVEL,
@@ -56,7 +54,6 @@ static const struct option _lopts[] = {
     { "mtu",        required_argument,   NULL,  GETOPT_MTU },
     { "mark",       required_argument,   NULL,  GETOPT_MARK },
     { "multicast",  no_argument,         NULL,  GETOPT_MULTICAST },
-    { "keepalive",  required_argument,   NULL,  GETOPT_KEEPALIVE },
     { "pid",        required_argument,   NULL,  GETOPT_PID },
     { "signal",     required_argument,   NULL,  GETOPT_SIGNAL },
     { "level",      required_argument,   NULL,  GETOPT_LEVEL },
@@ -88,7 +85,6 @@ print_usage(const char *prog) {
          "  [--mtu <mtu>]\t\t MTU size (default: 1426)\n"
          "  [--mark <mark>]\t netfilter mark (default: 0x3dd5)\n"
          "  [--multicast] \t enable multicast\n"
-         "  [--keepalive <second>] keepalive delay (default: 0)\n"
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
          "  [--level <level>] \t log level: debug, info, warn, error\n"
          "  [--debug] \t\t debug mode\n"
@@ -185,9 +181,6 @@ parse_opts(int argc, char *argv[]) {
         case GETOPT_MULTICAST:
             multicast = 1;
             break;
-        case GETOPT_KEEPALIVE:
-            keepalive_interval = strtol(optarg, NULL, 10);
-            break;
         case GETOPT_PID:
             pidfile = optarg;
             break;
@@ -278,9 +271,6 @@ main(int argc, char *argv[]) {
     }
 
     tun_config(tun, ifconf, mtu);
-    if (keepalive_interval) {
-        tun_keepalive(tun, 1, keepalive_interval);
-    }
     tun_run(tun, addr);
 
     tun_free(tun);

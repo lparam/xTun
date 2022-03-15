@@ -1,6 +1,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <assert.h>
+#include <stdlib.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <linux/if.h>
@@ -9,6 +10,7 @@
 #include <netinet/udp.h>
 
 #include "uv.h"
+
 #include "util.h"
 #include "logger.h"
 #include "crypto.h"
@@ -16,7 +18,6 @@
 #include "tun.h"
 #include "tcp.h"
 #include "udp.h"
-#include "dns.h"
 #ifdef ANDROID
 #include "android.h"
 #endif
@@ -40,6 +41,31 @@ int dns_global;
 struct sockaddr dns_server;
 #endif
 
+typedef struct tundev_ctx {
+    uv_poll_t        watcher;
+    uv_sem_t         semaphore;
+    uv_async_t       async_handle;
+
+    udp_t           *udp;
+    tcp_server_t    *tcp_server;
+    tcp_client_t    *tcp_client;
+
+    int              tunfd;
+    struct tundev   *tun;
+} tundev_ctx_t;
+
+typedef struct tundev {
+    char                   iface[IFNAMSIZ];
+    char                   ifconf[128];
+    int                    mtu;
+    in_addr_t              addr;
+    in_addr_t              network;
+    in_addr_t              netmask;
+
+    uint32_t               queues;
+    struct tundev_ctx      contexts[0];
+} tundev_t;
+
 struct signal_ctx {
     int            signum;
     uv_signal_t    sig;
@@ -50,11 +76,11 @@ static void signal_cb(uv_signal_t *handle, int signum);
 static void signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data);
 
 int
-tun_write(int tunfd, uint8_t *buf, ssize_t len) {
+tun_write(tundev_ctx_t *ctx, uint8_t *buf, ssize_t len) {
     uint8_t *pos = buf;
     size_t remaining = len;
     while(remaining) {
-        ssize_t sz = write(tunfd, pos, remaining);
+        ssize_t sz = write(ctx->tunfd, pos, remaining);
         if(sz == -1) {
             if(errno != EAGAIN && errno != EWOULDBLOCK) {
                 logger_stderr("tun write (%d: %s)", errno, strerror(errno));
@@ -65,6 +91,14 @@ tun_write(int tunfd, uint8_t *buf, ssize_t len) {
         }
         pos += sz;
         remaining -= sz;
+    }
+    return 0;
+}
+
+int tun_network_check(struct tundev_ctx *ctx, struct iphdr *iphdr) {
+    in_addr_t client_network = iphdr->saddr & htonl(ctx->tun->netmask);
+    if (client_network != ctx->tun->network) {
+        return 1;
     }
     return 0;
 }
@@ -420,15 +454,6 @@ tun_config(tundev_t *tun, const char *ifconf, int fd, int mtu, int prot,
 }
 #endif
 
-int tun_keepalive(tundev_t *tun, int on, uint32_t interval) {
-    if (on && interval) {
-        tun->keepalive_interval = interval;
-    } else {
-        tun->keepalive_interval = 0;
-    }
-    return 0;
-}
-
 void
 tun_stop(tundev_t *tun) {
 #ifndef ANDROID
@@ -551,7 +576,7 @@ tun_run(tundev_t *tun, const char *server, int port) {
         for (i = 0; i < tun->queues; i++) {
             uv_thread_t thread_id;
             tundev_ctx_t *ctx = &tun->contexts[i];
-            ctx->udp = udp_new(ctx, &addr.addr);
+            ctx->udp = udp_new(ctx, &addr.addr, ctx->tun->mtu);
             uv_sem_init(&ctx->semaphore, 0);
             uv_thread_create(&thread_id, queue_start, ctx);
         }
@@ -570,17 +595,17 @@ tun_run(tundev_t *tun, const char *server, int port) {
         tundev_ctx_t *ctx = tun->contexts;
 
         if (mode == xTUN_SERVER) {
-            ctx->udp = udp_new(ctx, &addr.addr);
-            ctx->tcp_server = tcp_server_new(ctx, &addr.addr);
+            ctx->udp = udp_new(ctx, &addr.addr, ctx->tun->mtu);
+            ctx->tcp_server = tcp_server_new(ctx, &addr.addr, ctx->tun->mtu);
             udp_start(ctx->udp, loop);
             tcp_server_start(ctx->tcp_server, loop);
 
         } else {
             if (protocol == xTUN_TCP) {
-                ctx->tcp_client = tcp_client_new(ctx, &addr);
+                ctx->tcp_client = tcp_client_new(ctx, &addr, ctx->tun->mtu);
                 tcp_client_start(ctx->tcp_client, loop);
             } else {
-                ctx->udp = udp_new(ctx, &addr.addr);
+                ctx->udp = udp_new(ctx, &addr.addr, ctx->tun->mtu);
                 udp_start(ctx->udp, loop);
             }
         }

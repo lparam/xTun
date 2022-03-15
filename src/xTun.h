@@ -26,6 +26,5 @@ int tun_run(struct tundev *tun, struct peer_addr addr);
 #endif
 void tun_free(struct tundev *tun);
 void tun_stop(struct tundev *tun);
-int tun_keepalive(struct tundev *tun, int on, uint32_t interval);
 
 #endif // for #ifndef _XTUN_H

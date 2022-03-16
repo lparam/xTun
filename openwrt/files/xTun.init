@@ -5,8 +5,10 @@ START=72
 STOP=30
 FIREWALL_RELOAD=0
 
+USE_PROCD=0
+
 IFACE=tun0
-IP=10.0.0.2/24
+IP=10.0.1.2/24
 SERVER=IP
 PORT=PORT
 PASSWORD=PASSWORD
@@ -17,6 +19,7 @@ BLACK_LIST=/etc/black_list
 IP_ROUTE_TABLE=xTun
 IP_ROUTE_TABLE_ID=200
 FWMARK="0x023/0x023"
+PREF=30001
 SETNAME=wall
 CHAIN=xTun
 
@@ -29,12 +32,14 @@ start() {
 stop() {
     net_stop
     acl del
+    ipset flush $SETNAME
     xTun --signal stop
 }
 
 shutdown() {
     net_stop
     acl del
+    ipset flush $SETNAME
     xTun --signal quit
 }
 
@@ -58,7 +63,7 @@ net_start() {
         iptables -F $CHAIN
         iptables -Z $CHAIN
     )
-    iptables -I $CHAIN 1 -i $IFACE -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    iptables -I $CHAIN 1 -i $IFACE -m conntrack --ctstate NEW,RELATED,ESTABLISHED -j ACCEPT
     iptables -I $CHAIN 1 -o $IFACE -j ACCEPT
     iptables -I FORWARD -j $CHAIN
 
@@ -68,7 +73,7 @@ net_start() {
         iptables -t mangle -F $CHAIN
         iptables -t mangle -Z $CHAIN
     )
-    ipset -N $SETNAME iphash -exist
+    ipset -N $SETNAME hash:net maxelem 65536 -exist
     iptables -t mangle -A $CHAIN -m set --match-set $SETNAME dst -j MARK --set-mark $FWMARK
     iptables -t mangle -A PREROUTING -j $CHAIN
     iptables -t mangle -A OUTPUT -j $CHAIN
@@ -86,7 +91,7 @@ net_start() {
 
     ip route add default dev $IFACE table $IP_ROUTE_TABLE
     ip route list | grep -q "$DNS dev $IFACE" || ip route add $DNS dev $IFACE
-    ip rule list | grep -q "fwmark $FWMARK lookup $IP_ROUTE_TABLE" || ip rule add fwmark $FWMARK table $IP_ROUTE_TABLE
+    ip rule list | grep -q "fwmark $FWMARK lookup $IP_ROUTE_TABLE" || ip rule add fwmark $FWMARK pref $PREF table $IP_ROUTE_TABLE
 
     ip route flush cache
 }

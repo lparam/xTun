@@ -12,6 +12,7 @@ BLACK_LIST=/etc/xTun_black_list
 IP_ROUTE_TABLE=xTun
 IP_ROUTE_TABLE_ID=200
 FWMARK="0x023/0x023"
+PREF=30001
 SETNAME=wall
 CHAIN=xTun
 
@@ -24,12 +25,14 @@ start() {
 stop() {
     net_stop
     acl del
+    ipset flush $SETNAME
     xTun --signal stop
 }
 
 shutdown() {
     net_stop
     acl del
+    ipset flush $SETNAME
     xTun --signal quit
 }
 
@@ -86,7 +89,7 @@ net_start() {
 
     ip route add default dev $IFACE table $IP_ROUTE_TABLE
     ip route list | grep -q "$DNS dev $IFACE" || ip route add $DNS dev $IFACE
-    ip rule list | grep -q "fwmark $FWMARK lookup $IP_ROUTE_TABLE" || ip rule add fwmark $FWMARK table $IP_ROUTE_TABLE
+    ip rule list | grep -q "fwmark $FWMARK lookup $IP_ROUTE_TABLE" || ip rule add fwmark $FWMARK pref $PREF table $IP_ROUTE_TABLE
 
     ip route flush cache
 }
@@ -148,12 +151,12 @@ case $command in
         show_help
         ;;
     *)
-        shift
-        ${command} $@
-        if [ $? = 127 ]; then
-            echo "Error: '$command' is not a known command." >&2
-            echo "       Run '$ProgName --help' for a list of known commands." >&2
-            exit 1
-        fi
-        ;;
+    shift
+    ${command} $@
+    if [ $? = 127 ]; then
+        echo "Error: '$command' is not a known command." >&2
+        echo "       Run '$ProgName --help' for a list of known commands." >&2
+        exit 1
+    fi
+    ;;
 esac

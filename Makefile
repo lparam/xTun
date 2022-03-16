@@ -148,8 +148,6 @@ $(xTUN): \
 	$(OBJTREE)/src/signal.o \
 	$(OBJTREE)/src/buffer.o \
 	$(OBJTREE)/src/crypto.o \
-	$(OBJTREE)/src/dns.o \
-	$(OBJTREE)/src/local_ns_parser.o \
 	$(OBJTREE)/src/peer.o \
 	$(OBJTREE)/src/packet.o \
 	$(OBJTREE)/src/tcp.o \

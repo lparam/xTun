@@ -1,6 +1,6 @@
 #!/bin/sh
 
-IFACE=tun0
+IFACE=xt0
 CIDR=10.0.1.2/24
 SERVER=server.me
 PORT=1082

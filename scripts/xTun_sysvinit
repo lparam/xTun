@@ -13,7 +13,7 @@
 # Description:       Start or stop the xTun server
 ### END INIT INFO
 
-IFACE=tun0
+IFACE=xt0
 CIDR=10.0.1.1/24
 PORT=1082
 PASSWORD=password
@@ -129,14 +129,14 @@ case $command in
         show_help
         ;;
     *)
-        shift
-        ${command} $@
-        if [ $? = 127 ]; then
-            echo "Error: '$command' is not a known command." >&2
-            echo "       Run '$ProgName --help' for a list of known commands." >&2
-            exit 1
-        fi
-        ;;
+    shift
+    ${command} $@
+    if [ $? = 127 ]; then
+        echo "Error: '$command' is not a known command." >&2
+        echo "       Run '$ProgName --help' for a list of known commands." >&2
+        exit 1
+    fi
+    ;;
 esac
 
 exit $RC

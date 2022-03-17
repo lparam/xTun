@@ -231,7 +231,7 @@ int tcp_opts(int fd, uint32_t mark) {
 }
 
 int socket_mark(int fd, uint32_t mark) {
-#ifdef SO_MARK
+#if defined (SO_MARK) && !defined (ANDROID)
     if (setsockopt(fd, SOL_SOCKET, SO_MARK, &mark, sizeof(mark))) {
         logger_stderr("setsockopt SO_MARK (%s)", strerror(errno));
         return 1;

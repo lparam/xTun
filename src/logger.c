@@ -84,10 +84,6 @@ logger_log(uint32_t level, const char *msg, ...) {
 
 void
 logger_stderr(const char *msg, ...) {
-    char timestr[20];
-    time_t curtime = time(NULL);
-    struct tm *loctime = localtime(&curtime);
-
     char tmp[LOG_MESSAGE_SIZE];
 
     va_list ap;
@@ -95,11 +91,18 @@ logger_stderr(const char *msg, ...) {
     vsnprintf(tmp, LOG_MESSAGE_SIZE, msg, ap);
     va_end(ap);
 
+#ifdef ANDROID
+    __android_log_print(ANDROID_LOG_ERROR, "xTun", "%s", tmp);
+#else
+    char timestr[20];
+    time_t curtime = time(NULL);
+    struct tm *loctime = localtime(&curtime);
+
     strftime(timestr, 20, "%Y/%m/%d %H:%M:%S", loctime);
     char m[300] = { 0 };
     sprintf(m, "\033[01;31m%s <%s>\033[0m %s\n", timestr, levels[LOG_ERR], tmp);
-
     log2std(stderr, m);
+#endif
 }
 
 int

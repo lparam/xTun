@@ -195,7 +195,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
                 }
             }
 
-            peer->protocol= xTUN_TCP;
+            peer->protocol= PROTOCOL_TCP;
             peer->data = c;
             c->peer = peer;
         }

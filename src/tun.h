@@ -2,7 +2,6 @@
 #define TUN_H
 
 #include <netinet/ip.h>
-#include <linux/if.h>
 
 #include "uv.h"
 
@@ -18,18 +17,21 @@
    1492 (Ethernet) - 20 (IPv4, or 40 for IPv6) - 20 (TCP) - 42 (xTun) */
 #define MTU 1410
 
-#define XTUN_MIN_MTU    1410
-#define XTUN_MAX_MTU    2048
-
-#define HASHSIZE 256
-
-#define xTUN_CLIENT		0x01
-#define xTUN_SERVER     0x02
-#define xTUN_TCP        0x01
-#define xTUN_UDP        0x02
+#define xTUN_MIN_MTU    1410
+#define xTUN_MAX_MTU    2048
 
 typedef struct tundev tundev_t;
 typedef struct tundev_ctx tundev_ctx_t;
+
+typedef enum rmode_t {
+   RMODE_CLIENT = 0x1,
+   RMODE_SERVER,
+} rmode_t;
+
+typedef enum protocol_t {
+   PROTOCOL_TCP = 0x1,
+   PROTOCOL_UDP,
+} protocol_t;
 
 typedef struct peer_addr {
     char node[128];
@@ -43,10 +45,10 @@ extern peer_t *peers[HASHSIZE];
 
 extern int debug;
 extern int verbose;
-extern int protocol;
 extern int multicast;
 extern uint32_t nf_mark;
-extern uint8_t mode;
+extern rmode_t mode;
+extern protocol_t protocol;
 
 #ifdef ANDROID
 extern int dns_global;

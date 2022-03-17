@@ -110,11 +110,11 @@ parse_opts(int argc, char *argv[]) {
             ifconf = optarg;
             break;
         case 'c':
-            mode = xTUN_CLIENT;
+            mode = RMODE_CLIENT;
             addrbuf = optarg;
             break;
         case 's':
-            mode = xTUN_SERVER;
+            mode = RMODE_SERVER;
             break;
         case 'k':
             password = optarg;
@@ -132,7 +132,7 @@ parse_opts(int argc, char *argv[]) {
             }
             break;
         case 't':
-            protocol = xTUN_TCP;
+            protocol = PROTOCOL_TCP;
             break;
         case 'n':
             daemon_mode = 0;
@@ -233,7 +233,7 @@ main(int argc, char *argv[]) {
     }
 
     if (addrbuf == NULL) {
-        if (mode == xTUN_SERVER) {
+        if (mode == RMODE_SERVER) {
             addrbuf = "0.0.0.0";
         } else {
             print_usage(argv[0]);
@@ -241,7 +241,7 @@ main(int argc, char *argv[]) {
         }
     }
 
-    protocol = protocol ? protocol : xTUN_UDP;
+    protocol = protocol ? protocol : PROTOCOL_UDP;
     nf_mark = nf_mark ? nf_mark : SOCKET_MARK;
 
     if (daemon_mode) {

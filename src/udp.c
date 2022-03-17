@@ -22,8 +22,6 @@
 #endif
 
 
-extern int tun_network_check(struct tundev_ctx *ctx, struct iphdr *iphdr);
-
 typedef struct udp {
     struct sockaddr *addr;
     int inet_udp_fd;
@@ -89,7 +87,7 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
         return;
     }
 
-    if (mode == xTUN_SERVER) {
+    if (mode == RMODE_SERVER) {
         struct iphdr *iphdr = (struct iphdr *) udp->recv_buffer.data;
         if (tun_network_check(udp->tun_ctx, iphdr)) {
             char *pa = inet_ntoa(*(struct in_addr *) &iphdr->saddr);
@@ -112,7 +110,7 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
                 peer->remote_addr = *addr;
             }
         }
-        peer->protocol = xTUN_UDP;
+        peer->protocol = PROTOCOL_UDP;
     }
 
     tun_write(udp->tun_ctx, udp->recv_buffer.data, udp->recv_buffer.len);
@@ -138,7 +136,7 @@ udp_send(udp_t *udp, buffer_t *buf, struct sockaddr *addr) {
     outbuf->base = (char *) buf->data;
     outbuf->len = buf->len;
     int rc = uv_udp_send(write_req, &udp->inet_udp, outbuf, 1,
-                         mode == xTUN_SERVER ? addr : udp->addr, inet_send_cb);
+                         mode == RMODE_SERVER ? addr : udp->addr, inet_send_cb);
     if (rc) {
         logger_log(LOG_ERR, "UDP Write error (%d: %s)", rc, uv_strerror(rc));
         buffer_free(buf);
@@ -152,7 +150,7 @@ udp_start(udp_t *udp, uv_loop_t *loop) {
 
     uv_udp_init(loop, &udp->inet_udp);
 
-    udp->inet_udp_fd = create_socket(SOCK_DGRAM, mode == xTUN_SERVER ? 1 : 0);
+    udp->inet_udp_fd = create_socket(SOCK_DGRAM, mode == RMODE_SERVER ? 1 : 0);
     if (udp->inet_udp_fd < 0) {
         logger_stderr("create socket error: %s", strerror(errno));
         exit(1);
@@ -170,7 +168,7 @@ udp_start(udp_t *udp, uv_loop_t *loop) {
                    rc ? "successful" : "failed");
 #endif
 
-    if (mode == xTUN_SERVER) {
+    if (mode == RMODE_SERVER) {
         rc = uv_udp_bind(&udp->inet_udp, udp->addr, UV_UDP_REUSEADDR);
         if (rc) {
             logger_stderr("UDP bind error: %s", uv_strerror(rc));

@@ -31,10 +31,10 @@ peer_t *peers[HASHSIZE];
 
 int debug;
 int verbose;
-int protocol;
 int multicast;
 uint32_t nf_mark;
-uint8_t mode;
+rmode_t mode;
+protocol_t protocol;
 
 #ifdef ANDROID
 int dns_global;
@@ -119,14 +119,14 @@ dispatch(buffer_t *tunbuf, tundev_ctx_t *ctx) {
         return 1;
     }
 
-    if (mode == xTUN_SERVER) {
+    if (mode == RMODE_SERVER) {
         rwlock_rlock(&peers_rwlock);
         peer_t *peer = peer_lookup(iphdr->daddr, peers);
         rwlock_runlock(&peers_rwlock);
         if (peer) {
             // TODO: use peerops_t
-            assert(peer->protocol == xTUN_TCP || peer->protocol == xTUN_UDP);
-            if (peer->protocol == xTUN_TCP) {
+            assert(peer->protocol == PROTOCOL_TCP || peer->protocol == PROTOCOL_UDP);
+            if (peer->protocol == PROTOCOL_TCP) {
                 tcp_server_send(peer, tunbuf);
             } else {
                 udp_send(ctx->udp, tunbuf, &peer->remote_addr);
@@ -169,7 +169,7 @@ dispatch(buffer_t *tunbuf, tundev_ctx_t *ctx) {
         }
 #endif
 
-        if (protocol == xTUN_TCP) {
+        if (protocol == PROTOCOL_TCP) {
             if (tcp_client_connected(ctx->tcp_client)) {
                 tcp_client_send(ctx->tcp_client, tunbuf);
 
@@ -218,14 +218,14 @@ close_tunfd(int fd) {
 
 static void
 close_network(tundev_ctx_t *ctx) {
-    if (mode == xTUN_SERVER) {
+    if (mode == RMODE_SERVER) {
         if (ctx->tcp_server) {
             tcp_server_stop(ctx->tcp_server);
         }
         udp_stop(ctx->udp);
 
     } else {
-        if (protocol == xTUN_TCP) {
+        if (protocol == PROTOCOL_TCP) {
             tcp_client_stop(ctx->tcp_client);
         } else {
             udp_stop(ctx->udp);
@@ -241,7 +241,7 @@ tun_alloc(const char *iface, uint32_t parallel) {
 
     nqueues = 1;
 #ifdef IFF_MULTI_QUEUE
-    nqueues = mode == xTUN_SERVER ? parallel : 1;
+    nqueues = mode == RMODE_SERVER ? parallel : 1;
 #endif
 
     size_t ctxsz = sizeof(tundev_ctx_t) * nqueues;
@@ -270,6 +270,9 @@ tun_alloc(const char *iface, uint32_t parallel) {
             logger_stderr("Config tun (%s)", strerror(errno));
             goto err;
         }
+#ifdef FD_CLOEXEC
+        fcntl(fd, F_SETFD, FD_CLOEXEC);
+#endif
         tundev_ctx_t *ctx = &tun->contexts[i];
         ctx->tun = tun;
         ctx->tunfd = fd;
@@ -309,14 +312,14 @@ void
 tun_free(tundev_t *tun) {
     for (int i = 0; i < tun->queues; i++) {
         tundev_ctx_t *ctx = &tun->contexts[i];
-        if (mode == xTUN_SERVER) {
+        if (mode == RMODE_SERVER) {
             if (ctx->tcp_server) {
                 tcp_server_free(ctx->tcp_server);
             }
             udp_free(ctx->udp);
 
         } else {
-            if (protocol == xTUN_TCP) {
+            if (protocol == PROTOCOL_TCP) {
                 tcp_client_free(ctx->tcp_client);
             } else {
                 udp_free(ctx->udp);
@@ -398,7 +401,7 @@ tun_config(tundev_t *tun, const char *ifconf, int mtu) {
 static void
 tun_close(uv_async_t *handle) {
     tundev_ctx_t *ctx = container_of(handle, tundev_ctx_t,
-                                              async_handle);
+                                     async_handle);
     tundev_t *tun = ctx->tun;
 
     uv_close((uv_handle_t *) &ctx->async_handle, NULL);
@@ -456,7 +459,7 @@ tun_config(tundev_t *tun, const char *ifconf, int fd, int mtu, int prot,
 void
 tun_stop(tundev_t *tun) {
 #ifndef ANDROID
-    if (mode == xTUN_SERVER && tun->queues > 1) {
+    if (mode == RMODE_SERVER && tun->queues > 1) {
         for (int i = 0; i < tun->queues; i++) {
             tundev_ctx_t *ctx = &tun->contexts[i];
             uv_async_send(&ctx->async_handle);
@@ -564,13 +567,13 @@ tun_run(tundev_t *tun, const char *server, int port) {
 #endif
     uv_loop_t *loop = uv_default_loop();
 
-    if (mode == xTUN_SERVER) {
+    if (mode == RMODE_SERVER) {
         rwlock_init(&peers_rwlock);
         uv_rwlock_init(&clients_rwlock);
         peer_init(peers);
     }
 
-    if (mode == xTUN_SERVER && tun->queues > 1) {
+    if (mode == RMODE_SERVER && tun->queues > 1) {
         int i;
         for (i = 0; i < tun->queues; i++) {
             uv_thread_t thread_id;
@@ -593,14 +596,14 @@ tun_run(tundev_t *tun, const char *server, int port) {
     } else {
         tundev_ctx_t *ctx = tun->contexts;
 
-        if (mode == xTUN_SERVER) {
+        if (mode == RMODE_SERVER) {
             ctx->udp = udp_new(ctx, &addr.addr, ctx->tun->mtu);
             ctx->tcp_server = tcp_server_new(ctx, &addr.addr, ctx->tun->mtu);
             udp_start(ctx->udp, loop);
             tcp_server_start(ctx->tcp_server, loop);
 
         } else {
-            if (protocol == xTUN_TCP) {
+            if (protocol == PROTOCOL_TCP) {
                 ctx->tcp_client = tcp_client_new(ctx, &addr, ctx->tun->mtu);
                 tcp_client_start(ctx->tcp_client, loop);
             } else {
@@ -621,7 +624,7 @@ tun_run(tundev_t *tun, const char *server, int port) {
         loop_close(loop);
     }
 
-    if (mode == xTUN_SERVER) {
+    if (mode == RMODE_SERVER) {
         uv_rwlock_destroy(&clients_rwlock);
         peer_destroy(peers);
     }

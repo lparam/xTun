@@ -43,7 +43,6 @@ struct sockaddr dns_server;
 
 typedef struct tundev_ctx {
     uv_poll_t        watcher;
-    uv_sem_t         semaphore;
     uv_async_t       async_handle;
 
     udp_t           *udp;
@@ -71,7 +70,7 @@ struct signal_ctx {
     uv_signal_t    sig;
 } signals[2];
 
-static void loop_close(uv_loop_t *loop);
+static void close_loop(uv_loop_t *loop);
 static void signal_cb(uv_signal_t *handle, int signum);
 static void signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data);
 
@@ -478,7 +477,7 @@ tun_stop(tundev_t *tun) {
 }
 
 static void
-queue_close(uv_async_t *handle) {
+worker_close(uv_async_t *handle) {
     tundev_ctx_t *ctx = container_of(handle, tundev_ctx_t, async_handle);
     uv_close((uv_handle_t *) &ctx->async_handle, NULL);
     close_network(ctx);
@@ -487,24 +486,21 @@ queue_close(uv_async_t *handle) {
 }
 
 static void
-queue_start(void *arg) {
+worker_start(void *arg) {
     tundev_ctx_t *ctx = arg;
     uv_loop_t loop;
 
     uv_loop_init(&loop);
-    uv_async_init(&loop, &ctx->async_handle, queue_close);
+    uv_async_init(&loop, &ctx->async_handle, worker_close);
 
     udp_start(ctx->udp, &loop);
-    /* tcp_server_start(ctx, &loop); */
 
     uv_poll_init(&loop, &ctx->watcher, ctx->tunfd);
     uv_poll_start(&ctx->watcher, UV_READABLE, poll_cb);
 
     uv_run(&loop, UV_RUN_DEFAULT);
 
-    loop_close(&loop);
-
-    uv_sem_post(&ctx->semaphore);
+    close_loop(&loop);
 }
 
 static void
@@ -515,7 +511,7 @@ walk_close_cb(uv_handle_t *handle, void *arg) {
 }
 
 static void
-loop_close(uv_loop_t *loop) {
+close_loop(uv_loop_t *loop) {
     uv_walk(loop, walk_close_cb, NULL);
     uv_run(loop, UV_RUN_DEFAULT);
     uv_loop_close(loop);
@@ -575,22 +571,19 @@ tun_run(tundev_t *tun, const char *server, int port) {
 
     if (mode == RMODE_SERVER && tun->queues > 1) {
         int i;
+        uv_thread_t threads[tun->queues];
         for (i = 0; i < tun->queues; i++) {
-            uv_thread_t thread_id;
             tundev_ctx_t *ctx = &tun->contexts[i];
             ctx->udp = udp_new(ctx, &addr.addr, ctx->tun->mtu);
-            uv_sem_init(&ctx->semaphore, 0);
-            uv_thread_create(&thread_id, queue_start, ctx);
+            uv_thread_create(&threads[i], worker_start, ctx);
         }
 
         signal_install(loop, signal_cb, tun);
 
         uv_run(loop, UV_RUN_DEFAULT);
 
-        loop_close(loop);
-
         for (i = 0; i < tun->queues; i++) {
-            uv_sem_wait(&tun->contexts[i].semaphore);
+            uv_thread_join(&threads[i]);
         }
 
     } else {
@@ -620,14 +613,18 @@ tun_run(tundev_t *tun, const char *server, int port) {
 #endif
 
         uv_run(loop, UV_RUN_DEFAULT);
-
-        loop_close(loop);
     }
 
     if (mode == RMODE_SERVER) {
         uv_rwlock_destroy(&clients_rwlock);
         peer_destroy(peers);
     }
+
+    close_loop(loop);
+
+#ifdef ANDROID
+    logger_log(LOG_INFO, "Graceful shutdown");
+#endif
 
     return 0;
 }

@@ -43,6 +43,7 @@ struct sockaddr dns_server;
 
 typedef struct tundev_ctx {
     uv_poll_t        watcher;
+    uv_sem_t         semaphore;
     uv_async_t       async_handle;
 
     udp_t           *udp;
@@ -473,6 +474,9 @@ tun_stop(tundev_t *tun) {
 #else
     tundev_ctx_t *ctx = tun->contexts;
     uv_async_send(&ctx->async_handle);
+    logger_log(LOG_INFO, "Wait for the loop to finish");
+    uv_sem_wait(&ctx->semaphore);
+    uv_sem_destroy(&ctx->semaphore);
 #endif
 }
 
@@ -560,6 +564,7 @@ tun_run(tundev_t *tun, const char *server, int port) {
         logger_stderr("Invalid server address");
         return 1;
     }
+    uv_sem_init(&tun->contexts[0].semaphore, 0);
 #endif
     uv_loop_t *loop = uv_default_loop();
 
@@ -623,6 +628,7 @@ tun_run(tundev_t *tun, const char *server, int port) {
     close_loop(loop);
 
 #ifdef ANDROID
+    uv_sem_post(&tun->contexts[0].semaphore);
     logger_log(LOG_INFO, "Graceful shutdown");
 #endif
 

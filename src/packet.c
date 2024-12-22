@@ -2,7 +2,6 @@
 
 #include "util.h"
 #include "packet.h"
-#include "tun.h"
 
 int
 packet_parse(packet_t *packet, buffer_t *buf, cipher_ctx_t *ctx) {

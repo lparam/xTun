@@ -3,10 +3,8 @@
 
 #include <netinet/ip.h>
 
-#include "uv.h"
-
-#include "rwlock.h"
 #include "peer.h"
+#include "rwlock.h"
 
 
 /* MTU of VPN tunnel device. Use the following formula to calculate:
@@ -14,11 +12,8 @@
 /* #define MTU 1440 */
 
 /* MTU of VPN tunnel device. Use the following formula to calculate:
-   1492 (Ethernet) - 20 (IPv4, or 40 for IPv6) - 20 (TCP) - 42 (xTun) */
-#define MTU 1410
-
-#define xTUN_MIN_MTU    1410
-#define xTUN_MAX_MTU    2048
+   1500 (Ethernet v2) - 40 (IPv4, or 40 for IPv6) - 20 (TCP) - 42 (xTun) */
+#define MTU 1398
 
 typedef struct tundev tundev_t;
 typedef struct tundev_ctx tundev_ctx_t;
@@ -39,7 +34,6 @@ typedef struct peer_addr {
     struct sockaddr addr;
 } peer_addr_t;
 
-extern uv_rwlock_t clients_rwlock;
 extern rwlock_t peers_rwlock;
 extern peer_t *peers[HASHSIZE];
 

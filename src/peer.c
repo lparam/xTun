@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "peer.h"
+#include "util.h"
 
 
 static uint32_t
@@ -32,12 +33,12 @@ peer_lookup(uint32_t addr, peer_t **peers) {
 }
 
 peer_t *
-peer_add(uint32_t tun_addr, struct sockaddr *remote_addr, peer_t **peers) {
-    int h = peer_hash(tun_addr);
+peer_add(uint32_t addr, struct sockaddr *remote_addr, peer_t **peers) {
+    int h = peer_hash(addr);
     peer_t *p = malloc(sizeof(peer_t));
     memset(p, 0, sizeof(*p));
-    p->tun_addr.s_addr = tun_addr;
-    p->remote_addr = *remote_addr;
+    p->tun_addr.s_addr = addr;
+    copy_addr((struct sockaddr *) &p->remote_addr, remote_addr);
     p->next = peers[h];
     peers[h] = p;
     return p;

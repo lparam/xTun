@@ -22,7 +22,7 @@ int tun_run(struct tundev *tun, const char *server, int port);
 struct peer_addr;
 struct tundev * tun_alloc(char *iface, uint32_t queues);
 void tun_config(struct tundev *tun, const char *ifconf, int mtu);
-int tun_run(struct tundev *tun, struct peer_addr addr);
+int tun_run(struct tundev *tun, struct peer_addr *addr);
 #endif
 void tun_free(struct tundev *tun);
 void tun_stop(struct tundev *tun);

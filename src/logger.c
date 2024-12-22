@@ -9,7 +9,6 @@
 #include <android/log.h>
 #endif
 
-#include "uv.h"
 #include "logger.h"
 
 

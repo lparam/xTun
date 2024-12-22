@@ -1,8 +1,9 @@
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <ctype.h>
+#include <sys/socket.h>
 #include <sys/syscall.h>
 
 #include "uv.h"
@@ -25,7 +26,7 @@ print_buffer(const void *data, uint32_t count, uint32_t width, uint32_t linelen)
     } lb;
 
     uint32_t i;
-    intptr_t addr = (intptr_t)data;
+    // intptr_t addr = (intptr_t)data;
 
     if (linelen * width > MAX_LINE_LENGTH_BYTES)
         linelen = MAX_LINE_LENGTH_BYTES / width;
@@ -75,7 +76,7 @@ print_buffer(const void *data, uint32_t count, uint32_t width, uint32_t linelen)
         printf("    %s\n", lb.uc);
 
         /* update references */
-        addr += thislinelen * width;
+        // addr += thislinelen * width;
         count -= thislinelen;
     }
 
@@ -88,7 +89,6 @@ dump_hex(const void *data, uint32_t len, char *title) {
     print_buffer(data, len, 1, 16);
 }
 
-
 void
 print_rss() {
     size_t rss;
@@ -98,94 +98,92 @@ print_rss() {
 
 int
 resolve_addr(const char *buf, int port, struct sockaddr *addr) {
-    int rc = 0;
-    struct sockaddr_in addr4;
-    struct sockaddr_in6 addr6;
-
     if ((port <= 0) || (port >= 65536)) {
-        logger_log(LOG_ERR, "Invalid port number: %d", port);
-        rc = 1;
-        goto err;
+        logger_log(LOG_ERR, "invalid port: %d", port);
+        return -1;
     }
 
-    /* If the IP address contains ':', it's IPv6; otherwise, IPv4 or domain. */
-    if (strchr(buf, ':') == NULL) {
-        rc = uv_ip4_addr(buf, port, &addr4);
-        if (rc) {
-            struct addrinfo hints;
-            struct addrinfo *result, *rp;
+    char service[6] = {0};
+    snprintf(service, 6, "%d", port);
 
-            memset(&hints, 0, sizeof(struct addrinfo));
-            hints.ai_family = AF_UNSPEC;
-            hints.ai_socktype = SOCK_STREAM;
-            rc = 0;
+    struct addrinfo hints;
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    hints.ai_flags = 0;
 
-            char service[6] = {0};
-            snprintf(service, 6, "%d", port);
-            int err = getaddrinfo(buf, service, &hints, &result);
-            if (err != 0) {
-                logger_stderr("Resolve %s error: %s", buf, gai_strerror(err));
-                rc = 1;
-                goto err;
-            }
+    uv_getaddrinfo_t req;
+    int rc = uv_getaddrinfo(uv_default_loop(), &req, NULL, buf, service, &hints);
+    if (rc != 0) {
+        logger_stderr("resolve [%s]:%d (%s)", buf, port, uv_strerror(rc));
+        return rc;
+    }
 
-            /* IPV4 priority */
-            for (rp = result; rp != NULL; rp = rp->ai_next) {
-                if (rp->ai_family == AF_INET) {
-                    memcpy(addr, rp->ai_addr, sizeof(struct sockaddr_in));
-                    break;
-                }
-            }
+    struct addrinfo *rp;
 
-            if (rp == NULL) {
-                for (rp = result; rp != NULL; rp = rp->ai_next) {
-                    if (rp->ai_family == AF_INET6) {
-                        memcpy(addr, rp->ai_addr, sizeof(struct sockaddr_in6));
-                        break;
-                    }
-                }
-            }
-
-            if (rp == NULL) {
-                logger_stderr("Resolve address failed: %s", buf);
-                rc = 1;
-            }
-
-            freeaddrinfo(result);
-            goto err;
-
-        } else {
-            *addr = *((struct sockaddr *) &addr4);
+    /* IPV4 priority */
+    for (rp = req.addrinfo; rp != NULL; rp = rp->ai_next) {
+        if (rp->ai_family == AF_INET) {
+            memcpy(addr, rp->ai_addr, sizeof(struct sockaddr_in));
+            break;
         }
-
-    } else {
-        uv_ip6_addr(buf, port, &addr6);
-        *addr = *((struct sockaddr *) &addr6);
     }
 
-err:
+    if (rp == NULL) {
+        for (rp = req.addrinfo; rp != NULL; rp = rp->ai_next) {
+            if (rp->ai_family == AF_INET6) {
+                memcpy(addr, rp->ai_addr, sizeof(struct sockaddr_in6));
+                break;
+            }
+        }
+    }
+
+    if (rp == NULL) {
+        logger_stderr("resolve [%s]:%d failed", buf, port);
+        rc = -1;
+    }
+
+    uv_freeaddrinfo(req.addrinfo);
+
     return rc;
 }
 
 int
-ip_name(const struct sockaddr *ip, char *name, size_t size) {
+ip_name(const struct sockaddr *addr, char *name, size_t size) {
+    int rc = 0;
     int port = -1;
-    if (ip->sa_family == AF_INET) {
-        uv_ip4_name((const struct sockaddr_in *) ip, name, size);
-        port = ntohs(((const struct sockaddr_in *) ip)->sin_port);
-    } else if (ip->sa_family == AF_INET6) {
-        uv_ip6_name((const struct sockaddr_in6 *) ip, name, size);
-        port = ntohs(((const struct sockaddr_in6 *) ip)->sin6_port);
+    if (addr->sa_family == AF_INET) {
+        struct sockaddr_in *ip = (struct sockaddr_in *)addr;
+        rc = uv_ip4_name(ip, name, size);
+        port = ntohs(ip->sin_port);
+    } else if (addr->sa_family == AF_INET6) {
+        struct sockaddr_in6 *ip = (struct sockaddr_in6 *)addr;
+        rc = uv_ip6_name(ip, name, size);
+        port = ntohs(ip->sin6_port);
+    }
+    if (rc) {
+        logger_stderr("parse ip name (%s)", uv_strerror(rc));
     }
     return port;
 }
 
+void
+copy_addr(struct sockaddr *dest, const struct sockaddr *src) {
+    if (src->sa_family == AF_INET) {
+        memcpy((struct sockaddr_in *)dest, (struct sockaddr_in *) src, sizeof(struct sockaddr_in));
+    } else if (src->sa_family == AF_INET6) {
+        memcpy((struct sockaddr_in6 *)dest, (struct sockaddr_in6 *) src, sizeof(struct sockaddr_in6));
+    } else {
+        logger_stderr("unsupported address family: %d", src->sa_family);
+    }
+}
+
 int
-create_socket(int type, int reuse) {
+create_socket(int type, int protocol, int reuse) {
     int sock;
-    sock = socket(AF_INET, type, IPPROTO_IP);
+    int domain = protocol == IPPROTO_IP ? AF_INET : AF_INET6;
+    sock = socket(domain, type, IPPROTO_IP);
     if (sock < 0) {
-        logger_stderr("socket error: %s", strerror(errno));
         return -1;
     }
     if (reuse) {

@@ -1,4 +1,6 @@
 #include <assert.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <string.h>
 #include <unistd.h>
 #include <inttypes.h>
@@ -20,7 +22,7 @@ typedef struct client {
         uv_handle_t handle;
         uv_stream_t stream;
     } handle;
-    struct sockaddr addr;
+    struct sockaddr_storage addr;
     buffer_t recv_buffer;
     packet_t packet;
     cipher_ctx_t *cipher_e;
@@ -55,6 +57,8 @@ client_compare(const struct client *a, const struct client *b) {
 
 RB_GENERATE_STATIC(client_tree, client, entry, client_compare)
 
+static uv_rwlock_t clients_rwlock;
+
 static client_t *
 client_new(size_t mtu) {
     client_t *c = malloc(sizeof(*c));
@@ -78,18 +82,18 @@ client_free(client_t *c) {
 static void
 client_close_cb(uv_handle_t *handle) {
     client_t *c = container_of(handle, client_t, handle);
-    char remote[INET_ADDRSTRLEN + 1];
-    int port = ip_name(&c->addr, remote, sizeof(remote));
-    logger_log(LOG_INFO, "TCP client is closed: %"PRIu64" - %s:%d",
+    char remote[64];
+    int port = ip_name((struct sockaddr *) &c->addr, remote, sizeof(remote));
+    logger_log(LOG_INFO, "TCP client is closed: %"PRIu64" - [%s]:%d",
                c->cid, remote, port);
     client_free(c);
 }
 
 static void
 client_close(client_t *c) {
-    char remote[INET_ADDRSTRLEN + 1];
-    int port = ip_name(&c->addr, remote, sizeof(remote));
-    logger_log(LOG_INFO, "Close the TCP client: %"PRIu64" - %s:%d",
+    char remote[64];
+    int port = ip_name((struct sockaddr *) &c->addr, remote, sizeof(remote));
+    logger_log(LOG_INFO, "Close the TCP client: %"PRIu64" - [%s]:%d",
                c->cid, remote, port);
     if (c->peer) {
         c->peer->data = NULL;
@@ -103,6 +107,7 @@ client_close(client_t *c) {
 
 tcp_server_t *
 tcp_server_new(struct tundev_ctx *ctx, struct sockaddr *addr, int mtu) {
+    uv_rwlock_init(&clients_rwlock);
     tcp_server_t *s = malloc(sizeof *s);
     memset(s, 0, sizeof *s);
     s->addr = addr;
@@ -113,6 +118,7 @@ tcp_server_new(struct tundev_ctx *ctx, struct sockaddr *addr, int mtu) {
 
 void
 tcp_server_free(tcp_server_t *s) {
+    uv_rwlock_destroy(&clients_rwlock);
     free(s);
 }
 
@@ -126,18 +132,18 @@ alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
 static void
 recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     int port;
-    char remote[INET_ADDRSTRLEN + 1];
+    char remote[64];
     tcp_server_t *s = stream->data;
     client_t *c = container_of(stream, client_t, handle.stream);
 
     if (nread <= 0) {
         if (nread < 0) {
-            port = ip_name(&c->addr, remote, sizeof(remote));
+            port = ip_name((struct sockaddr *) &c->addr, remote, sizeof(remote));
             if (nread != UV_EOF) {
-                logger_log(LOG_ERR, "Receive from cid:%"PRIu64" - %s:%d (%d: %s)",
+                logger_log(LOG_ERR, "Receive from cid:%"PRIu64" - [%s]:%d (%d: %s)",
                            c->cid, remote, port, nread, uv_strerror(nread));
             } else {
-                logger_log(LOG_INFO, "cid:%"PRIu64" - %s:%d close",
+                logger_log(LOG_INFO, "cid:%"PRIu64" - [%s]:%d close",
                            c->cid, remote, port);
             }
             client_close(c);
@@ -151,8 +157,8 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         if (rc == PACKET_UNCOMPLETE) {
             break;
         } else if (rc == PACKET_INVALID) {
-            port = ip_name(&c->addr, remote, sizeof(remote));
-            logger_log(LOG_ERR, "Invalid tcp packet from cid:%"PRIu64" - %s:%d",
+            port = ip_name((struct sockaddr *) &c->addr, remote, sizeof(remote));
+            logger_log(LOG_ERR, "Invalid tcp packet from cid:%"PRIu64" - [%s]:%d",
                        c->cid, remote, port);
             if (verbose) {
                 dump_hex(c->recv_buffer.data, c->recv_buffer.len,
@@ -180,7 +186,7 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
                 parse_addr(iphdr, saddr, daddr);
                 logger_log(LOG_NOTICE, "[TCP] Cache miss: %s -> %s", saddr, daddr);
                 rwlock_wlock(&peers_rwlock);
-                peer = peer_add(iphdr->saddr, &c->addr, peers);
+                peer = peer_add(iphdr->saddr, (struct sockaddr *) &c->addr, peers);
                 rwlock_wunlock(&peers_rwlock);
 
             } else {
@@ -188,8 +194,8 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
                     client_t *old = peer->data;
                     char saddr[24] = {0}, daddr[24] = {0};
                     parse_addr(iphdr, saddr, daddr);
-                    port = ip_name(&old->addr, remote, sizeof(remote));
-                    logger_log(LOG_WARNING, "Kick the TCP client: %"PRIu64" - %s:%d (%s)",
+                    port = ip_name((struct sockaddr *) &old->addr, remote, sizeof(remote));
+                    logger_log(LOG_WARNING, "Kick the TCP client: %"PRIu64" - [%s]:%d (%s)",
                                old->cid, remote, port, saddr);
                     client_close(old);
                 }
@@ -216,9 +222,9 @@ recv_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 static void
 client_info(client_t *client) {
     int port = 0;
-    char remote[INET_ADDRSTRLEN + 1];
-    port = ip_name(&client->addr, remote, sizeof(remote));
-    logger_log(LOG_INFO, "cid:%"PRIu64" - Connection attempt from [%s:%d]",
+    char remote[64];
+    port = ip_name((struct sockaddr *) &client->addr, remote, sizeof(remote));
+    logger_log(LOG_INFO, "cid:%"PRIu64" - Connection attempt from [%s]:%d",
                client->cid, remote, port);
 }
 
@@ -233,14 +239,34 @@ accept_cb(uv_stream_t *stream, int status) {
     uv_tcp_init(stream->loop, &client->handle.tcp);
     int rc = uv_accept(stream, &client->handle.stream);
     if (rc == 0) {
-        int len = sizeof(struct sockaddr);
-        uv_tcp_getpeername(&client->handle.tcp, &client->addr, &len);
+        int len = sizeof(client->addr);
+        int rc = uv_tcp_getpeername(&client->handle.tcp, (struct sockaddr *) &client->addr, &len);
+        if (rc) {
+            logger_log(LOG_ERR, "get client address (%s)", uv_strerror(rc));
+        }
+
+        if (client->addr.ss_family == AF_INET6) {
+            struct sockaddr_in6 *saddr = (struct sockaddr_in6 *) &client->addr;
+            uint32_t *addr32 = saddr->sin6_addr.__in6_u.__u6_addr32;
+            if (addr32[0] == 0 && addr32[1] == 0 && addr32[2] == 0xffff0000) {
+                struct sockaddr_in addr;
+                memset(&addr, 0, sizeof(addr));
+                addr.sin_family = AF_INET;
+                addr.sin_addr.s_addr = addr32[3];
+                addr.sin_port = saddr->sin6_port;
+                memset(&client->addr, 0, sizeof(client->addr));
+                memcpy(&client->addr, &addr, sizeof(addr));
+            }
+        }
+
         client_info(client);
+
         client->handle.stream.data = s;
         int fd = client->handle.tcp.io_watcher.fd;
         if (tcp_opts(fd, nf_mark) != 0) {
             logger_stderr("set tcp opts - %s", strerror(errno));
         }
+
         uv_read_start(&client->handle.stream, alloc_cb, recv_cb);
 
     } else {
@@ -255,7 +281,8 @@ tcp_server_start(tcp_server_t *s, uv_loop_t *loop) {
 
     uv_tcp_init(loop, &s->inet_tcp.tcp);
 
-    s->inet_tcp_fd = create_socket(SOCK_STREAM, 1);
+    int protocol = s->addr->sa_family == AF_INET ? IPPROTO_IP : IPPROTO_IPV6;
+    s->inet_tcp_fd = create_socket(SOCK_STREAM, protocol, 1);
     if (s->inet_tcp_fd < 0) {
         logger_stderr("create socket error (%d: %s)", errno, strerror(errno));
         exit(1);
@@ -266,7 +293,9 @@ tcp_server_start(tcp_server_t *s, uv_loop_t *loop) {
     }
 
     if ((rc = uv_tcp_bind(&s->inet_tcp.tcp, s->addr, 0))) {
-        logger_stderr("tcp bind error (%d: %s)", rc, uv_strerror(rc));
+        char name[64] = {0};
+        int port = ip_name(s->addr, name, sizeof(name));
+        logger_stderr("tcp bind on [%s]:%d (%d: %s)", name, port, rc, uv_strerror(rc));
         exit(1);
     }
 

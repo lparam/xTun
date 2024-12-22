@@ -7,7 +7,6 @@
 #include "crypto.h"
 #include "logger.h"
 #include "packet.h"
-#include "rwlock.h"
 #include "tcp.h"
 #include "util.h"
 #ifdef ANDROID
@@ -177,9 +176,9 @@ static void
 connect_cb(uv_connect_t *req, int status) {
     tcp_client_t *c = container_of(req, tcp_client_t, connect_req);
     if (status == 0) {
-        char remote[INET_ADDRSTRLEN + 1];
+        char remote[64];
         int port = ip_name(&c->peer_addr->addr, remote, sizeof(remote));
-        logger_log(LOG_INFO, "Successfully connected to server %s:%d", remote, port);
+        logger_log(LOG_INFO, "Successfully connected to server [%s]:%d", remote, port);
         ATOM_STORE(&c->status, CONNECTED);
         uv_timer_stop(&c->timer_reconnect);
         tcp_client_reset(c);
@@ -202,7 +201,8 @@ tcp_client_connect(tcp_client_t *c) {
 
     uv_tcp_init(c->timer_reconnect.loop, &c->inet_tcp.tcp);
 
-    c->inet_tcp_fd = create_socket(SOCK_STREAM, 0);
+    int protocol = c->peer_addr->addr.sa_family == AF_INET ? IPPROTO_IP : IPPROTO_IPV6;
+    c->inet_tcp_fd = create_socket(SOCK_STREAM, protocol, 0);
     if (c->inet_tcp_fd < 0) {
         logger_log(LOG_ERR, "Create socket - %s", strerror(errno));
         goto fail;
@@ -223,7 +223,7 @@ tcp_client_connect(tcp_client_t *c) {
                rc ? "successful" : "failed");
 #endif
 
-    logger_log(LOG_INFO, "Connect to server %s:%d ...", c->peer_addr->node, c->peer_addr->port);
+    logger_log(LOG_INFO, "Connect to server [%s]:%d ...", c->peer_addr->node, c->peer_addr->port);
     if (resolve_addr(c->peer_addr->node, c->peer_addr->port, &c->peer_addr->addr)) {
         goto fail;
     }

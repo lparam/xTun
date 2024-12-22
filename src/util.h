@@ -22,7 +22,8 @@
 void dump_hex(const void *data, uint32_t len, char *title);
 int resolve_addr(const char *buf, int port, struct sockaddr *addr);
 int ip_name(const struct sockaddr *ip, char *name, size_t size);
-int create_socket(int type, int reuse);
+void copy_addr(struct sockaddr *dest, const struct sockaddr *src);
+int create_socket(int type, int protocol, int reuse);
 int tcp_opts(int fd, uint32_t mark);
 int socket_mark(int fd, uint32_t mark);
 pid_t gettid();

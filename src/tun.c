@@ -25,7 +25,6 @@
 
 #define DNS_PORT 53
 
-uv_rwlock_t clients_rwlock;
 rwlock_t peers_rwlock;
 peer_t *peers[HASHSIZE];
 
@@ -108,11 +107,6 @@ dispatch(buffer_t *tunbuf, tundev_ctx_t *ctx) {
     char saddr[24] = {0}, daddr[24] = {0};
     struct iphdr *iphdr = (struct iphdr *) tunbuf->data;
 
-    if (iphdr->version != 4) {
-        logger_log(LOG_WARNING, "Discard non-IPv4 packet");
-        return 1;
-    }
-
     if (IN_MULTICAST(ntohl(iphdr->daddr)) && !multicast) {
         parse_addr(iphdr, saddr, daddr);
         logger_log(LOG_DEBUG, "Discard Multicast %s -> %s", saddr, daddr);
@@ -124,12 +118,11 @@ dispatch(buffer_t *tunbuf, tundev_ctx_t *ctx) {
         peer_t *peer = peer_lookup(iphdr->daddr, peers);
         rwlock_runlock(&peers_rwlock);
         if (peer) {
-            // TODO: use peerops_t
             assert(peer->protocol == PROTOCOL_TCP || peer->protocol == PROTOCOL_UDP);
             if (peer->protocol == PROTOCOL_TCP) {
                 tcp_server_send(peer, tunbuf);
             } else {
-                udp_send(ctx->udp, tunbuf, &peer->remote_addr);
+                udp_send(ctx->udp, tunbuf, (struct sockaddr *) &peer->remote_addr);
             }
 
         } else {
@@ -554,7 +547,7 @@ signal_install(uv_loop_t *loop, uv_signal_cb cb, void *data) {
 
 int
 #ifndef ANDROID
-tun_run(tundev_t *tun, peer_addr_t addr) {
+tun_run(tundev_t *tun, peer_addr_t *addr) {
 #else
 tun_run(tundev_t *tun, const char *server, int port) {
     peer_addr_t addr;
@@ -570,7 +563,6 @@ tun_run(tundev_t *tun, const char *server, int port) {
 
     if (mode == RMODE_SERVER) {
         rwlock_init(&peers_rwlock);
-        uv_rwlock_init(&clients_rwlock);
         peer_init(peers);
     }
 
@@ -579,7 +571,7 @@ tun_run(tundev_t *tun, const char *server, int port) {
         uv_thread_t threads[tun->queues];
         for (i = 0; i < tun->queues; i++) {
             tundev_ctx_t *ctx = &tun->contexts[i];
-            ctx->udp = udp_new(ctx, &addr.addr, ctx->tun->mtu);
+            ctx->udp = udp_new(ctx, &addr->addr, ctx->tun->mtu);
             uv_thread_create(&threads[i], worker_start, ctx);
         }
 
@@ -593,19 +585,18 @@ tun_run(tundev_t *tun, const char *server, int port) {
 
     } else {
         tundev_ctx_t *ctx = tun->contexts;
-
         if (mode == RMODE_SERVER) {
-            ctx->udp = udp_new(ctx, &addr.addr, ctx->tun->mtu);
-            ctx->tcp_server = tcp_server_new(ctx, &addr.addr, ctx->tun->mtu);
+            ctx->udp = udp_new(ctx, &addr->addr, ctx->tun->mtu);
+            ctx->tcp_server = tcp_server_new(ctx, &addr->addr, ctx->tun->mtu);
             udp_start(ctx->udp, loop);
             tcp_server_start(ctx->tcp_server, loop);
 
         } else {
             if (protocol == PROTOCOL_TCP) {
-                ctx->tcp_client = tcp_client_new(ctx, &addr, ctx->tun->mtu);
+                ctx->tcp_client = tcp_client_new(ctx, addr, ctx->tun->mtu);
                 tcp_client_start(ctx->tcp_client, loop);
             } else {
-                ctx->udp = udp_new(ctx, &addr.addr, ctx->tun->mtu);
+                ctx->udp = udp_new(ctx, &addr->addr, ctx->tun->mtu);
                 udp_start(ctx->udp, loop);
             }
         }
@@ -621,7 +612,6 @@ tun_run(tundev_t *tun, const char *server, int port) {
     }
 
     if (mode == RMODE_SERVER) {
-        uv_rwlock_destroy(&clients_rwlock);
         peer_destroy(peers);
     }
 

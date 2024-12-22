@@ -1,9 +1,10 @@
 #include <string.h>
 #include <assert.h>
+
 #include "sodium.h"
-#include "crypto.h"
+
 #include "buffer.h"
-#include "util.h"
+#include "crypto.h"
 
 /*
  *

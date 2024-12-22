@@ -130,7 +130,8 @@ new_query(int tunfd, struct iphdr *iphdr, struct udphdr *udphdr) {
     uv_udp_init(uv_default_loop(), &query->handle);
 
     int rc;
-    int fd = create_socket(SOCK_DGRAM, 0);
+    int protocol = iphdr->version == 4 ? IPPROTO_IP : IPPROTO_IPV6;
+    int fd = create_socket(SOCK_DGRAM, protocol, 0);
     if (fd < 0) {
         logger_log(LOG_ERR, "Create socket - %s", strerror(errno));
         return NULL;

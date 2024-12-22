@@ -68,10 +68,10 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
         return;
     }
 
-    char remote[INET_ADDRSTRLEN + 1];
+    char remote[64];
     if (nread <= CRYPTO_UDP_MIN_OVERHEAD) {
         int port = ip_name(addr, remote, sizeof(remote));
-        logger_log(LOG_ERR, "Invalid UDP packet from %s:%d", remote, port);
+        logger_log(LOG_ERR, "Invalid UDP packet from [%s]:%d", remote, port);
         return;
     }
 
@@ -80,7 +80,7 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
     int rc = crypto_decrypt_with_new_salt(&udp->recv_buffer, udp->cipher);
     if (rc) {
         int port = ip_name(addr, remote, sizeof(remote));
-        logger_log(LOG_ERR, "Invalid UDP packet from %s:%d", remote, port);
+        logger_log(LOG_ERR, "Invalid UDP packet from [%s]:%d", remote, port);
         if (verbose) {
             dump_hex(udp->recv_buffer.data, udp->recv_buffer.len, "Invalid UDP Packet");
         }
@@ -106,9 +106,7 @@ inet_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf,
             rwlock_wunlock(&peers_rwlock);
 
         } else {
-            if (memcmp(&peer->remote_addr, addr, sizeof(*addr))) {
-                peer->remote_addr = *addr;
-            }
+            copy_addr((struct sockaddr *) &peer->remote_addr, addr);
         }
         peer->protocol = PROTOCOL_UDP;
     }
@@ -150,9 +148,10 @@ udp_start(udp_t *udp, uv_loop_t *loop) {
 
     uv_udp_init(loop, &udp->inet_udp);
 
-    udp->inet_udp_fd = create_socket(SOCK_DGRAM, mode == RMODE_SERVER ? 1 : 0);
+    int protocol = udp->addr->sa_family == AF_INET ? IPPROTO_IP : IPPROTO_IPV6;
+    udp->inet_udp_fd = create_socket(SOCK_DGRAM, protocol, mode == RMODE_SERVER ? 1 : 0);
     if (udp->inet_udp_fd < 0) {
-        logger_stderr("create socket error: %s", strerror(errno));
+        logger_stderr("create udp socket (%s)", strerror(errno));
         exit(1);
     }
     socket_mark(udp->inet_udp_fd, nf_mark);
@@ -169,9 +168,10 @@ udp_start(udp_t *udp, uv_loop_t *loop) {
 #endif
 
     if (mode == RMODE_SERVER) {
-        rc = uv_udp_bind(&udp->inet_udp, udp->addr, UV_UDP_REUSEADDR);
-        if (rc) {
-            logger_stderr("UDP bind error: %s", uv_strerror(rc));
+        if ((rc = uv_udp_bind(&udp->inet_udp, udp->addr, UV_UDP_REUSEADDR))) {
+            char name[64] = {0};
+            int port = ip_name(udp->addr, name, sizeof(name));
+            logger_stderr("UDP bind on [%s]:%d (%s)", name, port, uv_strerror(rc));
             exit(1);
         }
     }

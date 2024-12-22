@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
+#include <uv.h>
 
 #include "util.h"
 #include "logger.h"
@@ -17,6 +18,7 @@
 
 
 static int mtu = MTU;
+static peer_addr_t addr;
 static int port = 1082;
 static int daemon_mode = 1;
 static uint32_t parallel = 1;
@@ -26,7 +28,7 @@ static char *ifconf;
 static char *addrbuf;
 static char *pidfile = "/var/run/xTun.pid";
 static char *password = NULL;
-static char *xsignal;
+static char *xSignal;
 
 int signal_process(char *signal, const char *pidfile);
 
@@ -78,11 +80,11 @@ print_usage(const char *prog) {
          "  -s --server\t\t run in server mode\n"
          "  [-p --port <port>]\t server port to listen on/connect to (default: 1082)\n"
          "  [-i <iface>]\t\t interface name (e.g. tun0)\n"
-         "  [-b --bind <host>]\t bind to a specific interface (only available on server mode, default: 0.0.0.0)\n"
+         "  [-b --bind <host>]\t bind to a specific interface (only available on server mode, e.g. '::', default: 0.0.0.0)\n"
          "  [-P <parallel>]\t number of parallel tun queues (only available on server mode & UDP)\n"
          "  [-t --tcp]\t\t use TCP rather than UDP (only available on client mode)\n"
          "  [--pid <pid>]\t\t PID file of daemon (default: /var/run/xTun.pid)\n"
-         "  [--mtu <mtu>]\t\t MTU size (default: 1426)\n"
+         "  [--mtu <mtu>]\t\t MTU size (default: 1398)\n"
          "  [--mark <mark>]\t netfilter mark (default: 0x3dd5)\n"
          "  [--multicast] \t enable multicast\n"
          "  [--signal <signal>]\t send signal to xTun: quit, stop\n"
@@ -186,7 +188,7 @@ parse_opts(int argc, char *argv[]) {
             break;
         case GETOPT_SIGNAL:
             if (strcmp(optarg, "stop") == 0 || strcmp(optarg, "quit") == 0) {
-                xsignal = optarg;
+                xSignal = optarg;
                 break;
             }
             fprintf(stderr, "invalid option: --signal %s\n", optarg);
@@ -223,8 +225,8 @@ int
 main(int argc, char *argv[]) {
     parse_opts(argc, argv);
 
-    if (xsignal) {
-        return signal_process(xsignal, pidfile);
+    if (xSignal) {
+        return signal_process(xSignal, pidfile);
     }
 
     if (!mode || !ifconf || !password) {
@@ -256,7 +258,6 @@ main(int argc, char *argv[]) {
 
     init();
 
-    peer_addr_t addr;
     strncpy(addr.node, addrbuf, sizeof(addr.node) - 1);
     addr.port = port;
 
@@ -271,7 +272,7 @@ main(int argc, char *argv[]) {
     }
 
     tun_config(tun, ifconf, mtu);
-    tun_run(tun, addr);
+    tun_run(tun, &addr);
 
     tun_free(tun);
     if (daemon_mode) {
